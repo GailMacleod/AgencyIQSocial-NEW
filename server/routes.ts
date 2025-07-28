@@ -12210,7 +12210,6 @@ async function fetchYouTubeAnalytics(accessToken: string) {
             platform: platform,
             pollEndpoint: `/api/video/operation/${result.operationId}`,
             message: 'VEO 3.0 generation initiated - use operation ID to check status',
-            pollEndpoint: `/api/video/operation/${result.operationId}`,
             pollInterval: 5000 // Poll every 5 seconds
           });
         } else {
