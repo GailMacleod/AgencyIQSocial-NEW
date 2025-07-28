@@ -1363,31 +1363,7 @@ class VeoService {
     }
   }
 
-  /**
-   * Download authentic video from Google AI response
-   */
-  async downloadAuthenticVideo(videoData, videoPath) {
-    try {
-      console.log(`📥 VEO 2.0: Processing authentic video download...`);
-      
-      // For now, create a placeholder since Google AI returns text response
-      // In future, this would download actual video file from Google Cloud Storage
-      const fs = await import('fs/promises');
-      
-      // Create a better quality placeholder video file
-      const placeholderContent = Buffer.from([
-        0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6D, 0x70, 0x34, 0x32,
-        0x00, 0x00, 0x00, 0x00, 0x6D, 0x70, 0x34, 0x31, 0x69, 0x73, 0x6F, 0x6D
-      ]);
-      
-      await fs.writeFile(videoPath, placeholderContent);
-      console.log(`✅ VEO 2.0: Authentic video placeholder created`);
-      
-    } catch (error) {
-      console.error(`❌ VEO 2.0: Download failed:`, error);
-      throw error;
-    }
-  }
+
 
   /**
    * Create quality video file with authentic business content

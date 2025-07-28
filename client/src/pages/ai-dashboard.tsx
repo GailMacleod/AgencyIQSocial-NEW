@@ -324,14 +324,14 @@ export default function AIDashboard() {
                   <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto" />
                   <p className="mt-2 text-sm text-gray-600">Analyzing performance data...</p>
                 </div>
-              ) : learningData?.insights ? (
+              ) : (learningData as LearningInsights)?.insights ? (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="font-semibold">Projected Improvement</h4>
                     <div className="flex items-center gap-2">
-                      <Progress value={learningData.insights.projectedImprovement} className="w-24" />
+                      <Progress value={(learningData as LearningInsights).insights.projectedImprovement} className="w-24" />
                       <span className="font-bold text-green-600">
-                        +{learningData.insights.projectedImprovement}%
+                        +{(learningData as LearningInsights).insights.projectedImprovement}%
                       </span>
                     </div>
                   </div>
@@ -339,7 +339,7 @@ export default function AIDashboard() {
                   <div>
                     <h5 className="font-medium mb-3">AI Insights</h5>
                     <div className="space-y-2">
-                      {learningData.insights.insights?.map((insight: string, i: number) => (
+                      {(learningData as LearningInsights).insights.insights?.map((insight: string, i: number) => (
                         <div key={i} className="flex items-start gap-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded">
                           <Target className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
                           <span className="text-sm">{insight}</span>
@@ -351,7 +351,7 @@ export default function AIDashboard() {
                   <div>
                     <h5 className="font-medium mb-3">Recommendations</h5>
                     <div className="space-y-2">
-                      {learningData.insights.recommendations?.map((rec: string, i: number) => (
+                      {(learningData as LearningInsights).insights.recommendations?.map((rec: string, i: number) => (
                         <div key={i} className="flex items-start gap-2 p-2 bg-green-50 dark:bg-green-900/20 rounded">
                           <Award className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
                           <span className="text-sm">{rec}</span>

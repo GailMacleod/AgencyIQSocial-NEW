@@ -8,6 +8,15 @@ import RouterErrorBoundary from "@/components/RouterErrorBoundary";
 import { performSecureLogout } from "@/utils/logout-handler";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
+// Import components directly for stable routing
+import Subscription from "@/pages/subscription";
+import BrandPurpose from "@/pages/brand-purpose";
+import IntelligentSchedule from "@/pages/intelligent-schedule";
+import Login from "@/pages/login";
+import Analytics from "@/pages/analytics";
+import AIDashboard from "@/pages/ai-dashboard";
+import VideoGen from "@/pages/video-gen";
+
 import GrokWidget from "@/components/grok-widget";
 import OnboardingWizard from "@/components/onboarding/OnboardingWizard";
 import NotFound from "@/pages/not-found";
@@ -24,15 +33,9 @@ import { useSessionManager } from "@/hooks/useSessionManager";
 import SessionLoadingSpinner from "@/components/SessionLoadingSpinner";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import Splash from "@/pages/splash";
-import Subscription from "@/pages/subscription";
-import BrandPurpose from "@/pages/brand-purpose";
 import PlatformConnections from "@/pages/real-platform-connections";
 import ConnectPlatforms from "@/pages/connect-platforms";
-import IntelligentSchedule from "@/pages/intelligent-schedule";
-import Login from "@/pages/login";
 import GrokTest from "@/pages/grok-test";
-import Analytics from "@/pages/analytics";
-import AIDashboard from "@/pages/ai-dashboard";
 import YearlyAnalytics from "@/pages/yearly-analytics";
 import Profile from "@/pages/profile";
 import ResetPassword from "@/pages/reset-password";
@@ -47,7 +50,8 @@ import InstagramFix from "@/pages/instagram-fix";
 import DataDeletionStatus from "@/pages/data-deletion-status";
 import MetaPixelTest from "@/pages/meta-pixel-test";
 import BulletproofDashboard from "@/pages/bulletproof-dashboard";
-import VideoGen from "@/pages/video-gen";
+
+
 
 
 // Enhanced logout component with comprehensive session clearing
