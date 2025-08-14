@@ -1,0 +1,18 @@
+// veo-service.ts
+import { quotaManager } from './quota-manager';
+
+class VeoService {
+  async pollOperationStatus(operationId: string, userId: number) {
+    const quota = await quotaManager.checkQuota(userId);
+    if (quota.remaining < 1) throw new Error('Quota exceeded');
+    return { success: true, videoId: `veo3_${operationId}` };
+  }
+  enhancePromptForVeo2(basePrompt: string, brandContext = {}) {
+    const cinematicElements = ['cinematic shot', '24fps motion', 'professional lighting', 'shallow depth of field'];
+    let brandElements = [];
+    if (brandContext.businessType) brandElements.push(`${brandContext.businessType} setting`);
+    if (brandContext.location === 'Queensland') brandElements.push('Australian business environment');
+    return [basePrompt, ...cinematicElements, ...brandElements, 'high quality'].join(', ');
+  }
+}
+export default VeoService;
