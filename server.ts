@@ -6,7 +6,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { eq } from 'drizzle-orm'; // FIXED: Added for DB queries
 import { storage } from './storage.ts'; // FIXED: Added for DB operations
-import quotaManager from './quota-manager'; // FIXED: Added for quota handling
+import quotaManager from './quota-manager.ts'; // FIXED: Added for quota handling
 import postScheduler from './post-scheduler'; // FIXED: Added for auto-posting
 import twilioService from './twilio-service'; // FIXED: Added for onboarding verify
 import { oauthService } from './oauth-service'; // FIXED: Added for OAuth revoke/refresh
@@ -96,6 +96,12 @@ try {
     tablename: 'sessions',
     createtable: true,
   });
+
+  // FIXED: Add session clearing on errors (researched: clears on errors for security/UE)
+app.use((err, req, res, next) => {
+  if (err && req.session) req.session.destroy();
+  next(err);
+});
 
   // FIXED: Add session clearing on errors (researched: clears on errors for security)
 app.use((err, req, res, next) => {

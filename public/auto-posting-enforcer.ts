@@ -45,6 +45,94 @@ static async originalEnforceAutoPosting(userId?: number): Promise<AutoPostingRes
       return result;
     }
 
+    // FIXED: Check subscription period (30 days from start, from architecture)
+    const subscriptionStart = user.subscriptionStart;
+    if (!subscriptionStart) {
+      result.errors.push('No active subscription found');
+      return result;
+    }
+
+    const now = new Date();
+    const subscriptionEnd = new Date(subscriptionStart);
+    subscriptionEnd.setDate(subscriptionEnd.getDate() + 30);
+
+    if (now > subscriptionEnd) {
+      result.errors.push('Subscription period expired');
+      return result;
+    }
+
+    // FIXED: Get quota status with 30-day cycle
+    const quotaStatus = await PostQuotaService.getQuotaStatus(userId);
+    if (quotaStatus.remainingPosts <= 0) {
+      result.errors.push('No remaining posts in quota');
+      return result;
+    }
+
+    // Get approved posts ready for publishing
+    const readyPosts = await this.getPostsReadyForPublishing(userId);
+    result.postsProcessed = readyPosts.length;
+
+    if (readyPosts.length === 0) {
+      result.success = true;
+      return result;
+    }
+
+    console.log(`Auto-posting enforcer (fallback): Processing ${readyPosts.length} ready posts for user ${userId}`);
+
+    // Process each post
+    for (const post of readyPosts) {
+      try {
+        // FIXED: Add platform-specific daily limits (from research to maximize posts without bans)
+        const limits = { facebook: 35, instagram: 100, linkedin: 100, youtube: 6, x: 2400 };
+        const daily = await PostCountManager.getDailyPosts(userId, post.platform); // FIXED: Use postCountManager for daily counts
+        if (daily >= limits[post.platform]) {
+          result.errors.push(`Daily limit reached for ${post.platform}`);
+          result.postsFailed++;
+          continue;
+        }
+
+        // Publish with retry on token error
+        let published = false;
+        let attempts = 0;
+        while (!published && attempts < 3) { // FIXED: Add 3 retries
+          try {
+            const publishResult = await this.publishToTargetPlatform(post);
+            if (publishResult.success) {
+              published = true;
+              result.postsPublished++;
+              await PostQuotaService.deductPost(userId, post.id); // FIXED: Deduct quota on success
+              await storage.updatePost(post.id, { status: 'published' }); // FIXED: Update status
+            } else {
+              throw new Error(publishResult.error);
+            }
+          } catch (error) {
+            attempts++;
+            if (error.message.includes('token')) {
+              await OAuthRefreshService.validateAndRefreshConnection(post.platform, userId); // FIXED: Retry with refresh
+              result.connectionRepairs.push(post.platform);
+            } else {
+              result.errors.push(`Publish failed for post ${post.id}: ${error.message}`);
+              result.postsFailed++;
+              break;
+            }
+          }
+        }
+      } catch (postError: any) {
+        result.errors.push(`Post ${post.id} failed: ${postError.message}`);
+        result.postsFailed++;
+      }
+    }
+
+    result.success = result.postsFailed === 0;
+  } catch (error: any) {
+    result.errors.push(`Enforcement failed: ${error.message}`);
+  } finally {
+    await this.logAutoPostingResult(result, userId);
+  }
+
+  return result;
+}
+
     // Check subscription period (30 days from start)
     const subscriptionStart = user.subscriptionStart;
     if (!subscriptionStart) {
