@@ -1,44 +1,43 @@
 // storage.ts
-// This file provides a DB abstraction layer (using Drizzle-ORM with PostgreSQL as per server.ts imports/env DATABASE_URL). It exports functions for user ops (create/get/save), OAuth tokens, quotas, post counts, etc.
-// Architecture Note: Acts as interface to DB – called from api.ts (e.g., onboarding createUser), authModule.ts (saveOAuthTokens), quota-manager.ts (updates), post-scheduler.ts (countDailyPosts). Assume schema: users table with id (uuid), email (unique), hashedPassword, phone, plan (starter/growth/professional), quotaRemaining (int), quotaCycleStart (date), oauthTokens (jsonb: {platform: {accessToken, refreshToken, expires?}}), platformIds (jsonb: {platform: id}), dailyPosts (jsonb: {platform: count, lastReset: date}).
-// Patches/Fixes Applied (deep review):
-// - Full impl for all called functions (missing in originals – e.g., getUserByEmail for uniqueness in onboarding, saveOAuthTokens for OAuth strategies, getUserPlan/checkQuota for generate-content, countDailyPosts for auto-posting limits).
-// - Quota handling: checkQuota returns {remaining, cycleStart}; uses 30-day cycle (reset if expired).
-// - Session recovery: getUserBySession (assume sessions table links sid to userId).
-// - Deletion: deleteUserData anonymizes/deletes per GDPR (for FB callback).
-// - Researched: No platform-specific here, but ensures tokens saved for revokes (e.g., FB accessToken needed for DELETE /permissions). For limits, dailyPosts reset daily to max posts without bans (merged from previous: FB=35, IG=50, LI=50, X=100, YT=6 – updated per tool results: IG=100/24h, X basic=100/month but daily ~3, YT=10k units ~6 uploads).
-// - End Objective: Persistent data for seamless UE (e.g., tokens for posting after connect, quotas sync with Stripe for money-making, daily counts to max subs posts/excellent service without bans).
-// - Instructions: Copy-paste into storage.ts. Install drizzle-orm/pg if needed (npm i drizzle-orm pg). Run migrations to create tables (add drizzle.config.json/migrate.ts as needed). Assume db connection: import { drizzle } from 'drizzle-orm/node-postgres'; import { Pool } from 'pg'; const pool = new Pool({ connectionString: process.env.DATABASE_URL }); export const db = drizzle(pool); // Then define schema in schema.ts. Next, we'll do quota-manager.ts.
+// ... (keep your existing imports and functions) ...
 
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { eq, sql } from 'drizzle-orm';
-import * as schema from './schema'; // Assume exports users, sessions tables
+import * as schema from './schema';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+await pool.connect(); // Add this line here (~line 8) – ensures DB connected before ops
+console.log('✅ DB connected'); // For confirmation in logs
+
 const db = drizzle(pool, { schema });
 
-// FIXED: Create user (for onboarding – returns {id, ...})
-async function createUser(data: { email: string; hashedPassword: string; phone: string }) {
-  const [user] = await db.insert(schema.users).values({
-    email: data.email,
-    hashedPassword: data.hashedPassword,
-    phone: data.phone,
-    plan: 'starter', // Default, update via Stripe
-    quotaRemaining: 10, // Starter quota
-    quotaCycleStart: new Date(),
-    oauthTokens: {},
-    platformIds: {},
-    dailyPosts: {}
-  }).returning();
-  return user;
+// ... (keep all your existing functions like createUser, getUserByEmail, etc.)
+
+// Add this new function (~line 100, for post-scheduler increment)
+async function incrementDailyPosts(userId: string, platform: string) {
+  const [user] = await db.select({ daily: sql`${schema.users.dailyPosts} -> ${platform}` }).from(schema.users).where(eq(schema.users.id, userId));
+  let daily = user?.daily || { count: 0, lastReset: new Date().toISOString().split('T')[0] };
+  const today = new Date().toISOString().split('T')[0];
+  if (daily.lastReset !== today) {
+    daily = { count: 0, lastReset: today };
+  }
+  daily.count += 1;
+  await db.update(schema.users).set({
+    dailyPosts: sql`jsonb_set(${schema.users.dailyPosts}, '{${platform}}', ${JSON.stringify(daily)})`
+  }).where(eq(schema.users.id, userId));
 }
 
-// FIXED: Get user by email (uniqueness check)
-async function getUserByEmail(email: string) {
-  const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email));
-  return user || null;
+// Add this for quota-manager prorate (~line 120)
+async function updateQuota(userId: string, remaining: number, cycleStart: Date) {
+  await db.update(schema.users).set({ quotaRemaining: remaining, quotaCycleStart: cycleStart }).where(eq(schema.users.id, userId));
 }
+
+export {
+  // ... (keep your existing exports),
+  incrementDailyPosts, // New
+  updateQuota // New
+};
 
 // FIXED: Get user by id
 async function getUserById(id: string) {
