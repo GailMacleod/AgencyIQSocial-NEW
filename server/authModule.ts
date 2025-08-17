@@ -17,7 +17,6 @@ catch (err) {
   done(err, null);
 }
 // Repeat for LI ~line 50, X ~line 70, YT ~line 90 catch blocks
-// Repeat for LI ~line 50, X ~line 70, YT ~line 90 catch blocks
 
 // FIXED: Configure strategies (your pasted Facebook is correct – patched with error logging; add others below it)
 function configurePassportStrategies() {
