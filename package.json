@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
-    "scripts": {
+  "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsc && vite build",
     "start": "NODE_ENV=production node dist/index.js",
@@ -180,5 +180,20 @@
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
-  }
+  },
+  "main": ".eslintrc.js",
+  "directories": {
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GailMacleod/AgencyIQSocial-NEW.git"
+  },
+  "keywords": [],
+  "author": "",
+  "bugs": {
+    "url": "https://github.com/GailMacleod/AgencyIQSocial-NEW/issues"
+  },
+  "homepage": "https://github.com/GailMacleod/AgencyIQSocial-NEW#readme",
+  "description": ""
 }
