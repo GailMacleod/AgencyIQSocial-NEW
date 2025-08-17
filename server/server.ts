@@ -156,6 +156,10 @@ app.use(async (req: MyRequest, res: Response, next: NextFunction) => {
 app.use(passport.initialize());
 app.use(passport.session());
 
+app.use(express.static(path.join(__dirname, 'dist/public'))); // Serve Vite build assets
+app.get('*', (req, res) => { // Catch-all for SPA routing
+  res.sendFile(path.join(__dirname, 'dist/public/index.html'));
+
 // FIXED: CSRF protection (after cookieParser)
 app.use(csurf({ cookie: true }));
 

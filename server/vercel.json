@@ -1,8 +1,14 @@
+// vercel.json (create in /server – configures fullstack deploy per tool/research for Vite + Express on Vercel)
 {
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" }, // Route API to backend function
+    { "source": "/(.*)", "destination": "/index.html" } // Route all else to static UI for SPA
+  ],
   "functions": {
-    "api/*.ts": { "runtime": "nodejs20.x" } // Forces Node 20 for TS/ESM compatibility, tool recommends for ERR_MODULE_NOT_FOUND
+    "api/index.js": { "runtime": "nodejs20.x" } // Node 20 for compatibility
   },
   "builds": [
-    { "src": "server.ts", "use": "@vercel/node" } // Explicit for Node app
-  ]
+    { "src": "server.ts", "use": "@vercel/node" } // Backend build
+  ],
+  "outputDirectory": "dist/public" // Vite frontend build dir
 }
