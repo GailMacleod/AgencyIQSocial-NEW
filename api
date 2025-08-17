@@ -351,11 +351,3 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
     res.status(400).json({ error: 'Webhook failed' });
   }
 });
-// FIXED: Module exports for Vercel serverless (researched via tool: Exports app for Vercel to handle as Node function in api/server.ts—no app.listen needed, fixes code display with vercel.json rewrites below, aligns with 2025 deployment best practices for dynamic app vs static)
-module.exports = app;
-
-// FIXED: Final catch-all middleware for 404 not found (patched to handle undefined routes gracefully with JSON response/log, fixes potential silent fails/UE issues in old/new versions without it—placed last after all routes/handlers for architecture order)
-app.use((req: MyRequest, res: Response) => {
-  console.warn(`404 Not Found: ${req.method} ${req.url}`);
-  res.status(404).json({ error: 'Not Found', message: `Route ${req.url} does not exist`, timestamp: new Date().toISOString() });
-});
