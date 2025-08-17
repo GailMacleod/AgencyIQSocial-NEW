@@ -5,7 +5,8 @@ async function initiateVeoGeneration(content: string, opts: { cinematic: boolean
   try {
     // Researched: POST to Vertex AI for Veo (adjust project/location per Google AI Studio setup)
     // veo-service.ts (~line 10 – replace with your actual Google AI Studio project ID from console.cloud.google.com)
-    const response = await axios.post('https://us-central1-aiplatform.googleapis.com/v1/projects/theagencyiq/locations/us-central1/publishers/google/models/video:generateContent', { ... });
+    // veo-service.ts (~line 10 – replace with your actual Google AI Studio project ID from console.cloud.google.com)
+const response = await axios.post('https://us-central1-aiplatform.googleapis.com/v1/projects/theagencyiq/locations/us-central1/publishers/google/models/video:generateContent', { ... });
       prompt: content,
       parameters: opts
     }, {

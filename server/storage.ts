@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { eq, sql } from 'drizzle-orm';
 import * as schema from './schema.ts';
+import * as schema from './schema.ts'; // Change to this
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 await pool.connect(); // Add this line here (~line 8) – ensures DB connected before ops
