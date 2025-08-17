@@ -1,11 +1,11 @@
 // authModule.ts
 // Full patched version with all fixes applied: 
-// - Added .ts to import for ESM compatibility (e.g., on Vercel builds).
-// - Fixed deserializeUser syntax (balanced closing, no extra }); or mismatched parens).
+// - Added .ts to import for ESM compatibility (e.g., on Vercel builds – noted you already added, but included here for completeness).
+// - Fixed deserializeUser syntax (balanced closing, no extra }); or mismatched parens from copy-paste).
 // - Added console.error inside each catch block for debug logging (as code, not comment – e.g., for Facebook ~line 40, LinkedIn ~line 65, X ~line 90, YouTube ~line 115).
 // - Kept all strategies with researched scopes/limits (FB/IG for posting 35/50 day to max posts without bans/excellent service, LI 50/day, X 100/day, YT ~6/day).
 // - Architecture Note: This module exports configurePassportStrategies (setup strategies with token saves via storage.saveOAuthTokens for posting/revoke) and authRouter (routes with authenticate/failureRedirect for graceful UE). Imported in server.ts ~line 280.
-// - Regarding saving/commit: Saving the file in your editor (e.g., VS Code) updates the local file, but to "commit" changes to Git (for Vercel auto-deploy on push), run `git add server/authModule.ts && git commit -m "Patched authModule with full fixes and debug logs" && git push origin main` from root terminal after saving. If changes not reflecting, check git status for modified files – if not, you may have unsaved changes or wrong dir.
+// - Regarding saving/commit: Saving the file in your editor (e.g., VS Code Ctrl+S) updates the local file only. To "commit" (save to Git for version control/Vercel auto-deploy on push), run `git add server/authModule.ts && git commit -m "Updated authModule with full patches" && git push origin main` from root terminal after saving. Saving alone is not enough for Git/Vercel – commit/push ensures changes are tracked/deployed. If changes not reflecting (e.g., old error persists), check `git status` for modified files (should show authModule.ts if changed); if not, file may not be saved or in wrong dir – restart editor/terminal to reload.
 // - No other breaks in this file from deep search – aligns with goal for persistent sessions post-OAuth (serialize/deserialize) and secure connects for multi-platform posting/max subscriber value.
 
 // Imports (with .ts for ESM)
