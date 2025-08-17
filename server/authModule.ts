@@ -1,30 +1,22 @@
-// authModule.ts
-// ... (keep your existing header comments) ...
+// authModule.ts (~line 1 – add .ts for ESM compatibility on Vercel build)
+import { storage } from './storage.ts'; // Change to this
 
-import express from 'express';
-import passport from 'passport';
-import { Strategy as FacebookStrategy } from 'passport-facebook';
-import { Strategy as LinkedInStrategy } from 'passport-linkedin-oauth2';
-import { Strategy as TwitterStrategy } from 'passport-twitter';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import { storage } from './storage';
-
-// authModule.ts (~line 5 – replace the deserializeUser function with this balanced version)
+// ~line 5 – fixed balanced deserializeUser (remove extra });, place comment outside)
 passport.deserializeUser(async (id: string, done) => {
   try {
     const user = await storage.getUserById(id);
     done(null, user);
   } catch (err) {
     done(err, null);
-  } // Remove extra }); here – function closes with this }
-});
+  }
+}); // Function closes here – no extra });
 
-// For the comment "// In each strategy callback, after try { ... } catch (err) { console.error... }"
-// This is not code – it's an instruction. Add the console.error inside each catch block (~line 20 for FB, ~line 50 for LI, etc.), e.g.:
+// Add console.error inside each catch block as code (not comment), e.g., for FB ~line 20:
 catch (err) {
   console.error(`Facebook OAuth failed: ${err.message}`); // e.g., Facebook OAuth failed: invalid scope
   done(err, null);
 }
+// Repeat for LI ~line 50, X ~line 70, YT ~line 90 catch blocks
 
 // FIXED: Configure strategies (your pasted Facebook is correct – patched with error logging; add others below it)
 function configurePassportStrategies() {

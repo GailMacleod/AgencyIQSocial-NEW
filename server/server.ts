@@ -210,8 +210,9 @@ app.use((err: any, req: MyRequest, res: Response, next: NextFunction) => {
 
 // FIXED: Initialize routes (dynamic import for modularity – authModule for OAuth, api for all /api)
 async function initializeRoutes() {
-  const { configurePassportStrategies, authRouter } = await import('./authModule'); // Assume exports strategies config and router
-  const { apiRouter } = await import('./api'); // From new api.ts
+  // server.ts (~line 280 in initializeRoutes – add .ts for ESM compatibility)
+const { configurePassportStrategies, authRouter } = await import('./authModule.ts');
+const { apiRouter } = await import('./api.ts');
 
   configurePassportStrategies(); // Setup passport.use for platforms
   app.use('/auth', authRouter);
