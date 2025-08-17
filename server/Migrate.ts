@@ -1,7 +1,8 @@
-// migrate.ts
-import { db } from './storage';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
+// migrate.ts (~line 1 – add .ts extension)
+import { db } from './storage.ts'; // Change to this
+
+// Rest unchanged
 (async () => {
-  await migrate(db, { migrationsFolder: './drizzle' }); // Create /server/drizzle if not
+  await migrate(db, { migrationsFolder: './drizzle' });
   console.log('✅ Migrations run');
 })();

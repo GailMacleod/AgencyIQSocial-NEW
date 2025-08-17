@@ -9,18 +9,22 @@ import { Strategy as TwitterStrategy } from 'passport-twitter';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { storage } from './storage';
 
-// Passport serialize/deserialize (unchanged)
-passport.serializeUser((user: any, done) => done(null, user.id));
+// authModule.ts (~line 5 – replace the deserializeUser function with this balanced version)
 passport.deserializeUser(async (id: string, done) => {
   try {
     const user = await storage.getUserById(id);
     done(null, user);
   } catch (err) {
     done(err, null);
-  
-// In each strategy callback, after try { ... } catch (err) {
-console.error(`[Platform] OAuth failed: ${err.message}`); // e.g., Facebook OAuth failed: ...}
+  } // Remove extra }); here – function closes with this }
 });
+
+// For the comment "// In each strategy callback, after try { ... } catch (err) { console.error... }"
+// This is not code – it's an instruction. Add the console.error inside each catch block (~line 20 for FB, ~line 50 for LI, etc.), e.g.:
+catch (err) {
+  console.error(`Facebook OAuth failed: ${err.message}`); // e.g., Facebook OAuth failed: invalid scope
+  done(err, null);
+}
 
 // FIXED: Configure strategies (your pasted Facebook is correct – patched with error logging; add others below it)
 function configurePassportStrategies() {
