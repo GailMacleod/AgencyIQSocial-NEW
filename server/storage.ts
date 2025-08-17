@@ -91,34 +91,16 @@ async function checkQuota(userId: string) {
   return { remaining: user?.remaining || 0, cycleStart: user?.cycleStart || new Date() };
 }
 
-// FIXED: Count daily posts (for auto-posting limits – jsonb {platform: {count: int, lastReset: date}})
-async function countDailyPosts(userId: string, platform: string): Promise<number> {
-  const [user] = await db.select({ daily: sql`${schema.users.dailyPosts} -> ${platform}` }).from(schema.users).where(eq(schema.users.id, userId));
-  const daily = user?.daily || { count: 0, lastReset: new Date().toISOString().split('T')[0] };
-  const today = new Date().toISOString().split('T')[0];
-  if (daily.lastReset !== today) {
-    daily.count = 0;
-    daily.lastReset = today;
-    await db.update(schema.users).set({
-      dailyPosts: sql`jsonb_set(${schema.users.dailyPosts}, '{${platform}}', ${JSON.stringify(daily)})`
-    }).where(eq(schema.users.id, userId));
-  }
-  return daily.count;
+// storage.ts (your existing file – add these after existing functions)
+async function incrementDailyPosts(userId: string, platform: string) {
+  // ... (copy from my previous message – the full function for daily count increment)
 }
 
-// FIXED: Get user by session (for recovery – assume sessions table with sid, userId)
-async function getUserBySession(sid: string) {
-  const [sess] = await db.select({ userId: schema.sessions.userId }).from(schema.sessions).where(eq(schema.sessions.sid, sid));
-  if (sess?.userId) {
-    return await getUserById(sess.userId);
-  }
-  return null;
+async function updateQuota(userId: string, remaining: number, cycleStart: Date) {
+  await db.update(schema.users).set({ quotaRemaining: remaining, quotaCycleStart: cycleStart }).where(eq(schema.users.id, userId));
 }
 
-// FIXED: Activate subscription (from Stripe webhook – set plan/remaining)
-async function activateSubscription(userId: string, subId: string) {
-  await db.update(schema.users).set({ stripeSubId: subId, plan: 'starter', quotaRemaining: 10 }).where(eq(schema.users.id, userId));
-}
+// In exports at bottom, add: incrementDailyPosts, updateQuota
 
 // FIXED: Delete user data (for FB GDPR – delete or anonymize)
 async function deleteUserData(fbUserId: string) {

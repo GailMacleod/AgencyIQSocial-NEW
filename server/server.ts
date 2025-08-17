@@ -47,6 +47,9 @@ if (!process.env.XAI_API_KEY) throw new Error('Missing XAI_API_KEY for Grok API 
 if (!process.env.GOOGLE_AI_STUDIO_KEY) throw new Error('Missing GOOGLE_AI_STUDIO_KEY for Veo3/Vertex AI (from cloud.google.com)');
 if (!process.env.DATABASE_URL) throw new Error('Missing DATABASE_URL for DB (PostgreSQL/Drizzle)');
 if (!process.env.TWILIO_SID) throw new Error('Missing TWILIO_SID for phone verification');
+// server.ts (~line 25, after TWILIO_SID check)
+if (!process.env.TWILIO_AUTH_TOKEN) throw new Error('Missing TWILIO_AUTH_TOKEN for Twilio client');
+if (!process.env.TWILIO_VERIFY_SID) throw new Error('Missing TWILIO_VERIFY_SID for verification service');
 if (!process.env.REDIS_URL) console.warn('REDIS_URL missing - sessions fallback to SQLite, may not scale for production UE');
 
 const app: Express = express();

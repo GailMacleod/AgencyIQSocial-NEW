@@ -17,7 +17,9 @@ passport.deserializeUser(async (id: string, done) => {
     done(null, user);
   } catch (err) {
     done(err, null);
-  }
+  
+// In each strategy callback, after try { ... } catch (err) {
+console.error(`[Platform] OAuth failed: ${err.message}`); // e.g., Facebook OAuth failed: ...}
 });
 
 // FIXED: Configure strategies (your pasted Facebook is correct – patched with error logging; add others below it)
