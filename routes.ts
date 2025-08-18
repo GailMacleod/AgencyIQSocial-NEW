@@ -56,8 +56,7 @@ import { requireProSubscription, checkVideoAccess } from './middleware/proSubscr
 import { veoProtection } from './middleware/veoRateLimit';
 import { VeoUsageTracker } from './services/VeoUsageTracker';
 
-app.use('/api/post', checkQuotaMiddleware, async (req, res, next) => {
-  const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
+app.use('/api/post', checkQuotaMiddleware, async (req: Request, res: Response, next: NextFunction) => { const user = req.session.userId ? await db.select().from(users).where(eq(users.id, req.session.userId)).first() : null; 
   // From research below: Get max based on sub
 const quotas = user.stripeSubscriptionActive ? { twitter: 90, instagram: 90, facebook: 450, linkedin: 450, youtube: 9000 } : { twitter: 10, instagram: 10, facebook: 50, linkedin: 50, youtube: 1000 }; // From research, buffered
 const platform = req.body.platform || 'twitter'; // Default to twitter if not specified
