@@ -37,6 +37,8 @@ import { directTokenGenerator } from './services/DirectTokenGenerator';
 // import { quotaManager } from './services/QuotaManager'; // Commented out to fix ES module conflict
 import { checkVideoQuota, checkAPIQuota, checkContentQuota } from './middleware/quotaEnforcement';
 import { postingQueue } from './services/PostingQueue';
+import TwilioService from './twilio-service'; // For phone verification in /phone-verification/route.ts
+import OAuthService from './oauth-service'; // For revoke/refresh in OAuth flows
 import { CustomerOnboardingOAuth } from './services/CustomerOnboardingOAuth';
 import { PipelineOrchestrator } from './services/PipelineOrchestrator';
 import { EnhancedCancellationHandler } from './services/EnhancedCancellationHandler';
@@ -2741,6 +2743,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Complete phone verification and create account
+  import TwilioService from '../../../twilio-service'; // Adjust path
   app.post("/api/complete-phone-verification", async (req, res) => {
     try {
       const { phone, code, password } = req.body;
