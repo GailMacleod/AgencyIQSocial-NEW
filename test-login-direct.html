@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Login Direct</title>
+</head>
+<body>
+    <h1>Test Login Direct</h1>
+    <button onclick="testLogin()">Test Login</button>
+    <div id="result"></div>
+
+    <script>
+        async function testLogin() {
+            try {
+                console.log('Testing login...');
+                
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        email: 'gailm@macleodglba.com.au',
+                        phone: '+61424835189'
+                    })
+                });
+
+                console.log('Response status:', response.status);
+                console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+                
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                document.getElementById('result').innerHTML = `
+                    <h2>Login Response</h2>
+                    <p>Status: ${response.status}</p>
+                    <p>Set-Cookie: ${response.headers.get('set-cookie') || 'Not found'}</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                    <p>Current cookies: ${document.cookie}</p>
+                `;
+                
+                // Test API call after login
+                if (response.ok) {
+                    console.log('Login successful, testing API call...');
+                    const apiResponse = await fetch('/api/user', {
+                        credentials: 'include'
+                    });
+                    console.log('API response status:', apiResponse.status);
+                    const apiData = await apiResponse.json();
+                    console.log('API response data:', apiData);
+                    
+                    document.getElementById('result').innerHTML += `
+                        <h2>API Test After Login</h2>
+                        <p>Status: ${apiResponse.status}</p>
+                        <pre>${JSON.stringify(apiData, null, 2)}</pre>
+                    `;
+                }
+            } catch (error) {
+                console.error('Login test error:', error);
+                document.getElementById('result').innerHTML = `<p>Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

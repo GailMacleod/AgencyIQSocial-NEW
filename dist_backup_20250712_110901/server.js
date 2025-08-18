@@ -1,0 +1,2 @@
+import i from"express";import{dirname as o}from"path";import{fileURLToPath as n}from"url";var r=n(import.meta.url),m=o(r),t=i();t.use(i.static("dist",{setHeaders:(s,e)=>{e.endsWith(".js")?s.set("Content-Type","application/javascript"):e.endsWith(".css")&&s.set("Content-Type","text/css")}}));t.use(i.static("public"));t.get("*",(s,e)=>e.sendFile("dist/index.html",{root:process.cwd()}));t.listen(5e3,()=>{console.log("Server running on port 5000")});
+//# sourceMappingURL=server.js.map

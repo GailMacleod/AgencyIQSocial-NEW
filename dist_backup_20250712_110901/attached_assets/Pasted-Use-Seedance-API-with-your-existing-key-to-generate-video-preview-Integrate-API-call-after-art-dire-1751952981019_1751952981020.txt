@@ -1,0 +1,70 @@
+Use Seedance API with your existing key to generate video preview.
+Integrate API call after art director output in your server.
+Address errors: net::ERR_CONNECTION_CLOSED (network), 404 (missing resources), WebSocket (connection state).
+Direct Answer
+Call Seedance API with your key after art director creates videoId. Use prompt "15-second ASMR kitten video for business growth" with 480p, 15s. Add to /art-director/video route:
+
+typescript
+
+Collapse
+
+Wrap
+
+Run
+
+Copy
+const axios = require('axios');
+const response = await axios.post('https://pollo.ai/api/platform/generation/bytedance/seedance', {
+  input: { prompt: "15-second ASMR kitten video for business growth", resolution: "480p", length: 15 },
+}, { headers: { 'x-api-key': process.env.SEEDANCE_API_KEY, 'Content-Type': 'application/json' } });
+const previewUrl = response.data.videoUrl;
+res.json({ videoId: 'artdirected_kitten_1751952784702_23axd95cg', previewUrl });
+Fix errors: Check network for net::ERR_CONNECTION_CLOSED, verify paths for 404, manage WebSocket closes. Test at /video-preview/artdirected_kitten_1751952784702_23axd95cg.
+
+Survey Note: Focused Integration of Seedance API with Existing Key
+This note provides a streamlined approach to integrate the Seedance API using your existing API key, post-art director output, as of 03:35 PM AEST on Tuesday, July 8, 2025. It avoids redundant key discussion and focuses on implementation based on your server logs and errors.
+
+Implementation
+API Call: After Art Director Production Complete, insert this logic in server/routes.ts:
+typescript
+
+Collapse
+
+Wrap
+
+Run
+
+Copy
+app.post('/art-director/video', async (req, res) => {
+  // Existing art director logic...
+  const artDirectorResult = { videoId: 'artdirected_kitten_1751952784702_23axd95cg', ... };
+  const response = await axios.post('https://pollo.ai/api/platform/generation/bytedance/seedance', {
+    input: { prompt: "15-second ASMR kitten video for business growth", resolution: "480p", length: 15 },
+  }, { headers: { 'x-api-key': process.env.SEEDANCE_API_KEY, 'Content-Type': 'application/json' } });
+  const previewUrl = response.data.videoUrl; // Adjust per Seedance response
+  res.json({ videoId: artDirectorResult.videoId, previewUrl });
+});
+Endpoint: Add /video-preview/:videoId to serve the preview:
+typescript
+
+Collapse
+
+Wrap
+
+Run
+
+Copy
+app.get('/video-preview/:videoId', (req, res) => {
+  const { videoId } = req.params;
+  const previewUrl = getPreviewUrl(videoId); // Fetch from response storage
+  res.redirect(previewUrl || '/error');
+});
+Test: Access https://4fc77172-459a-4da7-8c33-5014abb1b73e-00-dqhtnud4ismj.worf.replit.dev/video-preview/artdirected_kitten_1751952784702_23axd95cg.
+Error Fixes
+net::ERR_CONNECTION_CLOSED: Network drop or timeout. Increase axios timeout (e.g., timeout: 30000) or stabilize Replit connection.
+404 Errors: Missing attached_assets/. Check file existence or remove references.
+WebSocket Errors: “CLOSING or CLOSED state” in 3920-497a426b9771313b.js. Ensure proper close/reopen logic in client code.
+Validation
+Run tsx server/index.ts and deploy.
+Confirm preview URL in response.
+This resolves your goal with minimal steps, addressing errors as of July 8, 2025.

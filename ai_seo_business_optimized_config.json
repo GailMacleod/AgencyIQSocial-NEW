@@ -1,0 +1,12 @@
+{
+  "businessProfile": {
+    "name": "TheAgencyIQ",
+    "industry": "Social Media Automation",
+    "location": "Queensland, Australia"
+  },
+  "seoSettings": {
+    "enableOptimization": true,
+    "targetMarket": "Queensland SME",
+    "primaryKeywords": ["social media automation", "Queensland business", "content generation"]
+  }
+}

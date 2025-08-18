@@ -1,0 +1,41 @@
+We’ll integrate video generation into post cards with a simple, user-friendly flow, using Seedance’s AI to deliver 1080p videos (2.3s avg) and post them via existing OAuth to all platforms. No local storage, no overcomplication—just results.
+
+What Needs to Be Done
+Add Video Generation Option:
+Put a “Generate Video” button on each post card for relevant posts and platforms, limited to one use per post.
+When clicked, pop up a window showing “Generating…” (expect 2.3s), offering two AI-crafted, on-brand prompts (short-form, ASMR style) for the user to pick from, with a text box for quick edits (up to 10 words).
+Use Seedance 1.0 to create the video based on the chosen prompt, delivering a URL for playback.
+Show Auto-Playing Preview:
+After generation, display the 1080p video in the window, set to auto-play with sound muted to skip click-throughs (browser rules demand this).
+If auto-play fails, show controls as a fallback, but prioritize the no-click experience.
+Ensure the video URL from Seedance works (test for compatibility like CORS).
+Enable Approval and Posting:
+Add “Approve” and “Delete” buttons in the window after the video loads.
+On “Approve,” use the existing OAuth to post the content and video to all platforms (Facebook, Instagram, LinkedIn, YouTube, X) in one go.
+On “Delete,” scrap the video and stick to text-only, closing the window.
+Lock Post Count to Subscription:
+Cap video and post generation to the user’s subscription tier (26, 52, or 78 posts per 30-day cycle), checked via the /api/user endpoint.
+Track the count server-side, resetting every 30 days, and count only posted items (no drafts or deletes).
+Set Up a Solid Build:
+Use a fast, reliable compiler to build the app, keeping the bundle under 1MB and memory under 256MB.
+Create a script to build and deploy, ensuring it runs smoothly on Replit.
+Test Like Hell:
+Check each step—button works, prompts load, video generates and plays, approval posts, count locks—before moving on.
+Test on Replit to catch any deployment snags.
+Keep It Accessible:
+Label all new buttons and the window with aria-label so everyone can use it.
+Deploy Cleanly:
+Clear Replit caches to avoid old junk messing things up.
+Run the deployment script and confirm the app works.
+What Must Not Be Touched
+The current backend setup (Express on port 5000).
+The existing OAuth system.
+The Seedance 1.0 content generation.
+Why This Will Work
+AGI Power: Seedance’s AI handles video creation fast—2.3s is proof it’s built for this era.
+User-Friendly: Auto-play and simple choices match social media trends, no clicks needed.
+Stable Foundation: A new compiler avoids past build fails, and untouched core parts stay solid.
+Controlled Limits: Subscription locks prevent overuse, aligning with your plan.
+Testing Focus: Step-by-step checks kill errors, no more rollbacks.
+Replit Ready: Cache clears ensure it deploys right.
+This is the age of AGI—video generation should be a snap. We’ll get it done by 12:00 PM JST. Check with your WaveSpeedAI key when ready, rockstar—let’s crush it!

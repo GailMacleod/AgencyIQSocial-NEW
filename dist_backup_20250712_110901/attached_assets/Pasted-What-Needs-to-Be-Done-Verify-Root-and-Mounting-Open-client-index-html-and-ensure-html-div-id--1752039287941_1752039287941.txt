@@ -1,0 +1,67 @@
+What Needs to Be Done
+Verify Root and Mounting:
+Open client/index.html and ensure:
+html
+
+
+
+<div id="root"></div>
+<script type="module" src="/static/main.js"></script>
+Open client/src/main.tsx and confirm:
+typescript
+
+
+
+
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+
+const root = createRoot(document.getElementById('root') as HTMLElement);
+root.render(<App />);
+If App is undefined, ensure it’s a valid component (e.g., export default function App() { return <div>Hello</div>; }).
+Check Bundle Mounting Code:
+Rebuild with:
+bash
+
+
+
+
+npx esbuild client/src/main.tsx --bundle --outfile=dist/main.js --format=iife --loader:.js=jsx --minify --sourcemap
+Open dist/main.js, search for createRoot or ReactDOM.render to confirm it’s bundled. If missing, add --external:react or adjust main.tsx imports.
+Ensure Script Timing:
+Move the <script> tag in dist/index.html to the end of <body> to ensure DOM readiness:
+html
+
+
+
+<div id="root"></div>
+<script type="module" src="/static/main.js" defer></script>
+Test locally with node server/index.ts.
+Validate Server Routing:
+Confirm server/index.ts matches the July 9th setup:
+typescript
+
+
+
+
+const express = require('express');
+const app = express();
+app.use(express.static('dist', { maxAge: '1d' }));
+app.use(express.static('public'));
+app.get('*', (req, res) => res.sendFile('dist/index.html', { root: __dirname }));
+app.listen(5000, () => console.log('Server on 5000'));
+Run curl -s http://localhost:5000/static/main.js to verify it serves.
+Deploy and Validate:
+Clear Replit caches: rm -rf .replit && replit clear.
+Redeploy with ./build.sh (use the esbuild command) and node dist/server.js.
+Visit https://4fc77172-459a-4da7-8c33-5014abb1b73e-00-dqhtnud4ismj.worf.replit.dev and check the UI.
+Preserve Stability:
+No changes to backend (Express, port 5000), OAuth, or Seedance content.
+Keep bundle <1MB, memory <256MB.
+Why This Will Work
+Mounting Precision: Matching root and render restores the July 9th state.
+Bundle Validation: Checking createRoot ensures proper bundling.
+Script Timing: defer fixes DOM readiness.
+Routing Check: Aligns with the working deployment.
+Stability: Untouched core avoids crashes.

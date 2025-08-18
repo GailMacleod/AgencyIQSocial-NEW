@@ -1,0 +1,21 @@
+<svg width="96" height="48" viewBox="0 0 96 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3250fa;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#00f0ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff538f;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- A -->
+  <path d="M4 42 L12 12 L18 12 L26 42 L20 42 L19 36 L11 36 L10 42 Z M13 30 L17 30 L15 22 Z" fill="url(#logoGradient)" stroke="url(#logoGradient)" stroke-width="0.5"/>
+  
+  <!-- i -->
+  <path d="M32 15 L38 15 L38 42 L32 42 Z M32 9 L38 9 L38 13 L32 13 Z" fill="url(#logoGradient)" stroke="url(#logoGradient)" stroke-width="0.5"/>
+  
+  <!-- Q -->
+  <path d="M44 12 C52 12 58 18 58 27 C58 33 55 37 51 39 L56 42 L51 42 L47 39 C46 39.5 44.5 40 43 40 C49 40 44 12 44 12 Z M44 16 C47 16 50 16 53 19 C55 21 55 24 55 27 C55 30 55 33 53 34 C51 36 48 36 46 36 L44 36 C41 36 38 33 38 27 C38 21 41 16 44 16 Z" fill="url(#logoGradient)" stroke="url(#logoGradient)" stroke-width="0.5"/>
+  
+  <!-- Decorative swoosh -->
+  <path d="M62 24 C65 21 69 22 72 24 C75 25 78 27 81 24 C84 21 87 22 90 25 C91.5 27 93 30 90 33 C87 36 84 34 81 33 C78 31 75 30 72 33 C69 36 66 34 63 31 C61.5 29 60 27 62 24 Z" fill="url(#logoGradient)" opacity="0.6"/>
+</svg>

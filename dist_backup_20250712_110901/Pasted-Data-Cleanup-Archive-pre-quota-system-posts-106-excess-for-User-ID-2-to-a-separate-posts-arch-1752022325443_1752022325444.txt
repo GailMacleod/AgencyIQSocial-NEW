@@ -1,0 +1,145 @@
+Data Cleanup
+
+
+
+
+
+Archive pre-quota system posts (106 excess for User ID 2) to a separate posts_archive table.
+
+
+
+Retain only current cycle posts (23 published, within 52-post quota).
+
+
+
+Reset user quota to reflect accurate state: 52 total, 29 remaining (52 - 23 published).
+
+
+
+Quota Reconciliation
+
+
+
+
+
+Validate published post count (23) via SQL query: SELECT COUNT(*) FROM posts WHERE user_id = 2 AND status = 'published';.
+
+
+
+Update remaining_posts to 29 in users table for User ID 2.
+
+
+
+Reflect accurate quota (29/52) in frontend UI for transparency.
+
+
+
+Historical Data Audit
+
+
+
+
+
+Query all users with total_posts > 52 to identify quota exceedances: SELECT id, email, total_posts FROM users WHERE total_posts > 52;.
+
+
+
+Log legacy post sources (e.g., pre-July 2025 testing) in a legacy_data_log table.
+
+
+
+Define cleanup SOP: archive excess posts, update quotas, notify users.
+
+
+
+Gift Certificate Cleanup
+
+
+
+
+
+Archive redeemed certificates (e.g., PROF-TEST-IBLGLY2F) to gift_certificates_archive table, retaining original certificate numbers and metadata (code, plan, redeemed date).
+
+
+
+Ensure active certificates remain in gift_certificates table with unchanged codes.
+
+
+
+Verify no duplicate certificate numbers via: SELECT code, COUNT(*) FROM gift_certificates GROUP BY code HAVING COUNT(*) > 1;.
+
+8.2 System Improvements
+
+
+
+
+
+Enhanced Monitoring
+
+
+
+
+
+Implement real-time quota dashboard tracking remaining_posts and total_posts per user.
+
+
+
+Set anomaly alerts for total_posts > 52 or unexpected post status changes.
+
+
+
+Log historical quota trends in quota_history table for audit trails.
+
+
+
+Data Cleanup Automation
+
+
+
+
+
+Schedule monthly cron job to archive posts older than 6 months or exceeding quotas.
+
+
+
+Enforce retention policy: keep only active cycle posts; archive others to posts_archive.
+
+
+
+Auto-remove orphaned data (e.g., posts without valid user_id) via: DELETE FROM posts WHERE user_id NOT IN (SELECT id FROM users);.
+
+
+
+User Communication
+
+
+
+
+
+Display quota status (e.g., "29/52 posts remaining") on all frontend pages.
+
+
+
+Notify users of legacy post cleanup with email explaining historical data and new quota.
+
+
+
+Announce system updates (e.g., cleanup automation) via in-app banners and email.
+
+
+
+Gift Certificate Management
+
+
+
+
+
+Add UI warning during redemption if phone number matches existing user to prevent account linkage.
+
+
+
+Log certificate lifecycle (generated, redeemed, archived) in certificate_audit_log table.
+
+
+
+Allow admin to query certificate status by code without altering original numbers.

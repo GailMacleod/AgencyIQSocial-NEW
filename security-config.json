@@ -1,0 +1,30 @@
+{
+  "helmet": {
+    "contentSecurityPolicy": {
+      "directives": {
+        "defaultSrc": ["'self'"],
+        "styleSrc": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        "fontSrc": ["'self'", "https://fonts.gstatic.com"],
+        "scriptSrc": ["'self'", "'unsafe-inline'"],
+        "imgSrc": ["'self'", "data:", "https:"],
+        "connectSrc": ["'self'", "https://api.x.ai"]
+      }
+    },
+    "hsts": {
+      "maxAge": 31536000,
+      "includeSubDomains": true,
+      "preload": true
+    }
+  },
+  "rateLimit": {
+    "windowMs": 60000,
+    "max": 100,
+    "message": "Too many requests from this IP"
+  },
+  "cors": {
+    "origin": ["https://theagencyiq.ai", "https://www.theagencyiq.ai"],
+    "credentials": true,
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allowedHeaders": ["Content-Type", "Authorization", "X-Requested-With"]
+  }
+}

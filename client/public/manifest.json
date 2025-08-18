@@ -1,0 +1,21 @@
+{
+  "name": "TheAgencyIQ",
+  "short_name": "AgencyIQ",
+  "description": "Complete 5-Platform Social Media Automation for Queensland Small Businesses",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfcfc",
+  "theme_color": "#3250fa",
+  "icons": [
+    {
+      "src": "/attached_assets/agency_logo_1749083054761.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "social"],
+  "lang": "en",
+  "dir": "ltr",
+  "orientation": "portrait-primary"
+}

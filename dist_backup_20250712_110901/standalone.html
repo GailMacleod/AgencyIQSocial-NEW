@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TheAgencyIQ - AI-Powered Social Media Automation</title>
+    <link rel="stylesheet" href="/main.css">
+    <link rel="manifest" href="/manifest.json">
+    <script>
+        // Global React polyfill - ensure React is available before bundle loads
+        window.React = window.React || {};
+        window.ReactDOM = window.ReactDOM || {};
+        
+        // Meta Pixel initialization
+        !function(f,b,e,v,n,t,s)
+        {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+        n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+        if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+        n.queue=[];t=b.createElement(e);t.async=!0;
+        t.src=v;s=b.getElementsByTagName(e)[0];
+        s.parentNode.insertBefore(t,s)}(window, document,'script',
+        'https://connect.facebook.net/en_US/fbevents.js');
+        fbq('init', '1234567890');
+        fbq('track', 'PageView');
+        console.log('Meta Pixel test fired - initialization complete');
+        
+        // Delayed initialization to ensure proper loading
+        setTimeout(() => {
+            console.log('Meta Pixel initialized successfully');
+        }, 1000);
+    </script>
+</head>
+<body>
+    <div id="root">Loading TheAgencyIQ...</div>
+    <script src="/main.js"></script>
+    <script>
+        // Force application initialization if needed
+        if (window.App && typeof window.App === 'function') {
+            try {
+                window.App();
+            } catch (e) {
+                console.error('App initialization failed:', e);
+            }
+        }
+    </script>
+</body>
+</html>

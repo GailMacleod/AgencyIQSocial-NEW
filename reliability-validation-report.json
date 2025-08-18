@@ -1,0 +1,78 @@
+{
+  "timestamp": "2025-07-23T05:41:54.983Z",
+  "totalTests": 26,
+  "passedTests": 22,
+  "successRate": "84.6%",
+  "isProductionReady": false,
+  "categories": {
+    "sessionManagement": {
+      "total": 5,
+      "passed": 4,
+      "results": [
+        "✅ Retry session functionality implemented",
+        "✅ OAuth token refresh on 401 errors",
+        "✅ React Query cache synchronization",
+        "❌ Missing session timeout handling",
+        "✅ Toast notifications for session errors"
+      ]
+    },
+    "mobileDetection": {
+      "total": 5,
+      "passed": 3,
+      "results": [
+        "✅ Dynamic orientation change handling",
+        "❌ Missing debounced resize handling",
+        "❌ Missing event listener cleanup",
+        "✅ Comprehensive mobile state (width/height/orientation)",
+        "✅ SSR-safe with default values"
+      ]
+    },
+    "pwaManagement": {
+      "total": 5,
+      "passed": 5,
+      "results": [
+        "✅ Smart detection of already installed apps",
+        "✅ 7-day dismissal cooldown period",
+        "✅ Session sync before PWA installation",
+        "✅ User-friendly dismissal option",
+        "✅ Proper event handling and cleanup"
+      ]
+    },
+    "gaErrorHandling": {
+      "total": 3,
+      "passed": 3,
+      "results": [
+        "✅ Missing measurement ID detection",
+        "✅ GA initialization with error handling",
+        "✅ GA service with error boundaries"
+      ]
+    },
+    "errorBoundary": {
+      "total": 4,
+      "passed": 4,
+      "results": [
+        "✅ Retry button in session spinner",
+        "✅ Authentication error detection",
+        "✅ Network error visual indicators",
+        "✅ Fallback actions (login/refresh)"
+      ]
+    },
+    "conditionalOnboarding": {
+      "total": 4,
+      "passed": 3,
+      "results": [
+        "✅ Onboarding visibility state management",
+        "✅ LocalStorage onboarding tracking",
+        "✅ Backend setup completion validation",
+        "❌ Missing conditional rendering"
+      ]
+    }
+  },
+  "recommendations": [
+    "❌ MAJOR ISSUES: Significant reliability concerns require attention",
+    "🚨 Not ready for production deployment",
+    "🔧 sessionManagement: 1 items need attention",
+    "🔧 mobileDetection: 2 items need attention",
+    "🔧 conditionalOnboarding: 1 items need attention"
+  ]
+}
