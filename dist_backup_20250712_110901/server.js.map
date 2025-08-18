@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../server/index.ts"],
-  "sourcesContent": ["import express from 'express';\nimport { dirname } from 'path';\nimport { fileURLToPath } from 'url';\n\nconst __filename = fileURLToPath(import.meta.url);\nconst __dirname = dirname(__filename);\n\nconst app = express();\n\napp.use(express.static('dist', { \n  setHeaders: (res, path) => {\n    if (path.endsWith('.js')) {\n      res.set('Content-Type', 'application/javascript');\n    } else if (path.endsWith('.css')) {\n      res.set('Content-Type', 'text/css');\n    }\n  }\n}));\n\napp.use(express.static('public'));\n\napp.get('*', (req, res) => res.sendFile('dist/index.html', { root: process.cwd() }));\n\napp.listen(5000, () => {\n  console.log('Server running on port 5000');\n});"],
-  "mappings": "AAAA,OAAOA,MAAa,UACpB,OAAS,WAAAC,MAAe,OACxB,OAAS,iBAAAC,MAAqB,MAE9B,IAAMC,EAAaD,EAAc,YAAY,GAAG,EAC1CE,EAAYH,EAAQE,CAAU,EAE9BE,EAAML,EAAQ,EAEpBK,EAAI,IAAIL,EAAQ,OAAO,OAAQ,CAC7B,WAAY,CAACM,EAAKC,IAAS,CACrBA,EAAK,SAAS,KAAK,EACrBD,EAAI,IAAI,eAAgB,wBAAwB,EACvCC,EAAK,SAAS,MAAM,GAC7BD,EAAI,IAAI,eAAgB,UAAU,CAEtC,CACF,CAAC,CAAC,EAEFD,EAAI,IAAIL,EAAQ,OAAO,QAAQ,CAAC,EAEhCK,EAAI,IAAI,IAAK,CAACG,EAAKF,IAAQA,EAAI,SAAS,kBAAmB,CAAE,KAAM,QAAQ,IAAI,CAAE,CAAC,CAAC,EAEnFD,EAAI,OAAO,IAAM,IAAM,CACrB,QAAQ,IAAI,6BAA6B,CAC3C,CAAC",
-  "names": ["express", "dirname", "fileURLToPath", "__filename", "__dirname", "app", "res", "path", "req"]
-}

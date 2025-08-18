@@ -17,14 +17,14 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import crypto, { createHash } from "crypto";
-// import { passport } from "./oauth-config"; // Temporarily disabled - fixing core publishing
+import { passport } from "./oauth-config";
 import axios from "axios";
 import PostPublisher from "./post-publisher";
 import BreachNotificationService from "./breach-notification";
 import { authenticateLinkedIn, authenticateFacebook, authenticateInstagram, authenticateTwitter, authenticateYouTube } from './platform-auth';
 import { requireActiveSubscription, requireAuth, establishSession } from './middleware/subscriptionAuth';
 // import { PostQuotaService } from './PostQuotaService'; // Removed to fix ES module conflict
-import { userFeedbackService } from './userFeedbackService.js';
+import { userFeedbackService } from './userFeedbackService';
 import RollbackAPI from './rollback-api';
 import { OAuthRefreshService } from './services/OAuthRefreshService';
 import { AIContentOptimizer } from './services/AIContentOptimizer';
@@ -46,9 +46,54 @@ import TokenManager from './oauth/tokenManager.js';
 // import { apiRateLimit, socialPostingRateLimit, videoGenerationRateLimit, authRateLimit, skipRateLimitForDevelopment } from './middleware/rateLimiter'; // DISABLED FOR DEPLOYMENT
 // import { QuotaTracker, checkQuotaMiddleware } from './services/QuotaTracker'; // Commented out to fix ES module conflict
 // Removed duplicate quota routes import - using inline endpoint
-import { requireProSubscription, checkVideoAccess } from './middleware/proSubscriptionMiddleware.js';
-import { veoProtection } from './middleware/veoRateLimit.js';
-import { VeoUsageTracker } from './services/VeoUsageTracker.js';
+import { requireProSubscription, checkVideoAccess } from './middleware/proSubscriptionMiddleware';
+import { veoProtection } from './middleware/veoRateLimit';
+import { VeoUsageTracker } from './services/VeoUsageTracker';
+
+app.use('/api/post', checkQuotaMiddleware, async (req, res, next) => {
+  const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
+  // From research below: Get max based on sub
+  const maxPosts = user.stripeSubscriptionActive ? 90 : 10; // Buffer below limit
+  if (user.daily_posts >= maxPosts) return res.status(429).json({ error: 'Quota exceeded - Upgrade!' });
+  next();
+});
+
+app.use(session({
+  store: new (connectPg(session))({ conString: process.env.DATABASE_URL }),
+  secret: process.env.SESSION_SECRET || 'default_secret_change_this',
+  cookie: { secure: process.env.NODE_ENV === 'production', httpOnly: true, maxAge: 30 * 24 * 60 * 60 * 1000 }, // Secure cookies for prod
+  resave: false,
+  saveUninitialized: true
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+// OAuth routes for platforms (using authenticators; env secrets like TWITTER_CLIENT_ID must be in Vercel—check dashboard, add from dev portals if missing)
+app.get('/auth/twitter', authenticateTwitter); // From import ~Ln 24
+app.get('/auth/twitter/callback', passport.authenticate('twitter', { failureRedirect: '/' }), (req, res) => {
+  req.session.userId = req.user.id;
+  req.session.oauthTokens = { accessToken: req.user.accessToken, refreshToken: req.user.refreshToken, expires: Date.now() + 3600000 }; // 1h example; adjust per platform research
+  req.session.save();
+  res.redirect('/dashboard'); // Or subscription page for Stripe upsell
+});
+// Add similar for others, e.g., Instagram
+app.get('/auth/instagram', authenticateInstagram);
+app.get('/auth/instagram/callback', passport.authenticate('instagram', { failureRedirect: '/' }), (req, res) => {
+  // Similar token save; exchange for long-lived per Meta research
+  req.session.oauthTokens = { ...req.session.oauthTokens, instagram: { accessToken: req.user.accessToken } };
+  res.redirect('/dashboard');
+});
+// Env check for secrets (add to validation ~Ln 130)
+if (!process.env.TWITTER_CLIENT_ID) throw new Error('Missing TWITTER_CLIENT_ID for OAuth');
+
+app.post('/api/post', requireAuth, async (req, res) => {
+  const { content, platform } = req.body;
+  // Check quota first (from above)
+  postingQueue.add({ userId: req.session.userId, content, platform });
+  await db.update(users).set({ daily_posts: sql`${users.daily_posts} + 1` }).where(eq(users.id, req.session.userId));
+  res.json({ success: true });
+});
 
 // Extended session types
 declare module 'express-session' {
@@ -100,6 +145,23 @@ if (process.env.STRIPE_SECRET_KEY) {
     apiVersion: "2025-05-28.basil",
   });
 }
+
+// Stripe webhook for sub events (public path ~Ln 210)
+app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) { return res.status(400).send(`Webhook Error: ${err.message}`); }
+  if (event.type === 'customer.subscription.created') {
+    const sub = event.data.object;
+    await db.update(users).set({ subscriptionPlan: sub.items.data[0].plan.nickname.toLowerCase(), subscriptionActive: true }).where(eq(users.stripeCustomerId, sub.customer)); // Assume DB has stripeCustomerId
+  } else if (event.type === 'customer.subscription.deleted') {
+    await db.update(users).set({ subscriptionPlan: 'cancelled', subscriptionActive: false }).where(eq(users.stripeCustomerId, event.data.object.customer));
+  }
+  res.json({ received: true });
+});
+if (!process.env.STRIPE_WEBHOOK_SECRET) console.warn('Missing STRIPE_WEBHOOK_SECRET—add in Vercel for sub handling');
 
 // Configure SendGrid if available
 if (process.env.SENDGRID_API_KEY) {
@@ -269,17 +331,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Calculate quota based on subscription plan
-      const quotaLimits = {
-        'starter': 10,
-        'growth': 20, 
-        'professional': 30,
-        'cancelled': 0,
-        'free': 0
-      };
-      
-      const totalPosts = quotaLimits[user.subscriptionPlan as keyof typeof quotaLimits] || 0;
-      const publishedPosts = user.totalPosts || 0;
-      const remainingPosts = Math.max(0, totalPosts - publishedPosts);
+      const quotaLimits = user.subscriptionActive ? {
+  total: 90, // Pro max, buffered below researched limits (e.g., Twitter 100/day, Instagram 100/24h)
+  perPlatform: { twitter: 90, instagram: 90, facebook: 450, linkedin: 450, youtube: 9000 } // Units for YouTube; from research
+} : {
+  total: 10, // Free low to upsell
+  perPlatform: { twitter: 10, instagram: 10, facebook: 50, linkedin: 50, youtube: 1000 }
+};
+const totalPosts = quotaLimits.total;
+const publishedPosts = user.totalPosts || 0; // Assume DB has totalPosts; add if missing
+const remainingPosts = Math.max(0, totalPosts - publishedPosts);
+const platformsRemaining = Object.fromEntries(Object.entries(quotaLimits.perPlatform).map(([plat, max]) => [plat, max - (user[`published_${plat}`] || 0)])); // Assume per-platform DB fields; add columns
+// Stub for daily reset (integrate with DataCleanupService cron)
+if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
+  await db.update(users).set({ totalPosts: 0, lastQuotaReset: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, userId));
+}
       
       res.setHeader('Content-Type', 'application/json');
       res.status(200).json({
@@ -603,6 +669,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/refresh-oauth', requireAuth, async (req, res) => {
+  const { platform } = req.body;
+  const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
+  let newToken;
+  if (platform === 'instagram') {
+    // From research: Use Graph API to refresh long-lived token
+    const response = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.accessToken}`);
+    newToken = response.data.access_token;
+  } else if (platform === 'linkedin') {
+    // From research: Refresh via OAuth 2.0 for partners
+    const response = await axios.post('https://www.linkedin.com/oauth/v2/accessToken', {
+      grant_type: 'refresh_token',
+      refresh_token: user.refreshToken,
+      client_id: process.env.LINKEDIN_CLIENT_ID,
+      client_secret: process.env.LINKEDIN_CLIENT_SECRET
+    });
+    newToken = response.data.access_token;
+  } // Add for Twitter/Facebook/YouTube similarly (e.g., YouTube uses Google OAuth refresh)
+  await db.update(users).set({ accessToken: newToken }).where(eq(users.id, user.id));
+  res.json({ refreshed: true });
+});
+
   // SURGICAL FIX 1b: Session invalidation endpoint for cancelled subscriptions
   app.post('/api/auth/invalidate-session', async (req: any, res) => {
     try {
@@ -633,6 +721,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.use(passport.initialize());
+  app.use(passport.session());
+  app.get('/auth/twitter', passport.authenticate('twitter'));
+  app.get('/auth/twitter/callback', passport.authenticate('twitter', { failureRedirect: '/' }), (req, res) => {
+  req.session.userId = req.user.id; // Save for sessions
+  res.redirect('/dashboard');
+});
+
   // Initialize Passport and OAuth strategies BEFORE auth routes
   const { passport: configuredPassport, configurePassportStrategies } = await import('./oauth-config.js');
   app.use(configuredPassport.initialize());
@@ -640,6 +736,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Configure all Passport.js strategies
   configurePassportStrategies();
+
+  
 
   // Initialize isolated OAuth service
   const { OAuthService } = await import('./services/oauth-service.js');
@@ -1773,6 +1871,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve uploaded files
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
+  app.use(passport.initialize());
+  app.use(passport.session());
+  app.get('/auth/instagram', passport.authenticate('instagram'));
+  app.get('/auth/instagram/callback', passport.authenticate('instagram', { failureRedirect: '/' }), (req, res) => {
+  req.session.userId = req.user.id; // Save for sessions
+  res.redirect('/dashboard');
+});
+
+
   // Instagram OAuth fix endpoint for user_id: 2
   app.post('/api/instagram-oauth-fix', requireAuth, async (req: any, res) => {
     try {
@@ -1787,6 +1894,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+
+      app.use(passport.initialize());
+      app.use(passport.session());
+      app.get('/auth/facebook', passport.authenticate('facebook'));
+      app.get('/auth/facebook/callback', passport.authenticate('facebook', { failureRedirect: '/' }), (req, res) => {
+  req.session.userId = req.user.id; // Save for sessions
+  res.redirect('/dashboard');
+});
+// Add similar for Instagram/etc. using authenticateInstagram (Ln 24)
       // Use Facebook Access Token to connect Instagram Business API
       const facebookToken = process.env.FACEBOOK_USER_ACCESS_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
       if (!facebookToken) {
@@ -10482,6 +10598,20 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
           content: post.content,
           userId: userId
         }));
+
+        // Refresh token if expired (using research: e.g., Instagram refresh via GET)
+const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
+if (platform === 'instagram' && user.oauthTokens.expires < Date.now()) {
+  const response = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.oauthTokens.accessToken}`);
+  await db.update(users).set({ oauthTokens: { ...user.oauthTokens, accessToken: response.data.access_token, expires: Date.now() + (response.data.expires_in * 1000) } }).where(eq(users.id, user.id));
+  req.session.oauthTokens = user.oauthTokens; // Update session
+}
+// Platform-specific: e.g., multipart for video if content has media
+if (content.includes('video')) {
+  // Use multer for multipart (already imported)
+  const upload = multer().single('media');
+  upload(req, res, (err) => { if (err) return res.status(400).json({ error: 'Media upload failed' }); });
+}
 
         console.log(`📋 Queuing ${queuePosts.length} posts with 2s delays (max 3 per subscription)`);
         const queueIds = await postingQueue.addBatchToQueue(queuePosts);
