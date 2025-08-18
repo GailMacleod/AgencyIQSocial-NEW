@@ -58,9 +58,11 @@ import { VeoUsageTracker } from './services/VeoUsageTracker';
 
 app.use('/api/post', checkQuotaMiddleware, async (req: Request, res: Response, next: NextFunction) => { const user = req.session.userId ? await db.select().from(users).where(eq(users.id, req.session.userId)).first() : null; 
   // From research below: Get max based on sub
+  const maxPosts = user.subscriptionActive === true ? 90 : 10;
 const quotas = user.stripeSubscriptionActive ? { twitter: 90, instagram: 90, facebook: 450, linkedin: 450, youtube: 9000 } : { twitter: 10, instagram: 10, facebook: 50, linkedin: 50, youtube: 1000 }; // From research, buffered
 const platform = req.body.platform || 'twitter'; // Default to twitter if not specified
 const dailyPosts = user[`daily_posts_${platform}`] || 0; // Assume DB columns added
+const user = await db.select().from(users).where(eq(users.id, req.session.userId as number)).first();
 if (dailyPosts >= quotas[platform]) return res.status(429).json({ error: `Quota exceeded for ${platform} - Upgrade!` });
 if (published[platform.toLowerCase()] >= quotaLimits[platform.toLowerCase()]) return res.status(429).json({ error: 'Quota exceeded for ' + platform + ' - Upgrade!' });
   if (user.daily_posts >= maxPosts) return res.status(429).json({ error: 'Quota exceeded - Upgrade!' });
@@ -84,44 +86,58 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // OAuth routes for platforms (using authenticators; env secrets like TWITTER_CLIENT_ID must be in Vercel—check dashboard, add from dev portals if missing)
-app.get('/auth/twitter', authenticateTwitter); // From import ~Ln 24
-app.get('/auth/twitter/callback', passport.authenticate('twitter', { failureRedirect: '/' }), (req, res) => {
+app.get('/auth/twitter/callback', passport.authenticate('twitter', { failureRedirect: '/' }), (req: Request, res: Response) => {
   req.session.userId = req.user.id;
-  req.session.oauthTokens = { accessToken: req.user.accessToken, refreshToken: req.user.refreshToken, expires: Date.now() + 3600000 }; // 1h example; adjust per platform research
+  req.session.oauthTokens = { accessToken: req.user.accessToken, refreshToken: req.user.refreshToken, expires: Date.now() + 3600000 };
   req.session.save();
-  res.redirect('/dashboard'); // Or subscription page for Stripe upsell
+  res.redirect('/dashboard');
 });
+
+const quotas = user.subscriptionActive ? { twitter: 90, instagram: 90 /* etc. */ } : { twitter: 10, instagram: 10 /* etc. */ }; if (user[daily_posts_${platform}] >= quotas[platform]) return res.status(429).json({ error: 'Quota exceeded' });
 // Add similar for others, e.g., Instagram
 app.get('/auth/instagram', authenticateInstagram);
-app.get('/auth/instagram/callback', passport.authenticate('instagram', { failureRedirect: '/' }), (req, res) => {
-  // Similar token save; exchange for long-lived per Meta research
+app.get('/auth/instagram/callback', passport.authenticate('instagram', { failureRedirect: '/' }), (req: Request, res: Response) => {
   req.session.oauthTokens = { ...req.session.oauthTokens, instagram: { accessToken: req.user.accessToken } };
   res.redirect('/dashboard');
 });
-app.post('/api/refresh-oauth', requireAuth, async (req, res) => {
+
+const quotas = user.subscriptionActive ? { : 90, instagram: 90 /* etc. */ } : { twitter: 10, instagram: 10 /* etc. */ }; if (user[daily_posts_${platform}] >= quotas[platform]) return res.status(429).json({ error: 'Quota exceeded' });
+app.post('/api/refresh-oauth', requireAuth, async (req: Request, res: Response) => {
   const { platform } = req.body;
   const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
   let newToken;
   if (platform === 'instagram') {
-    const resp = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.oauthTokens.instagram.accessToken}`);
-    newToken = resp.data.access_token;
-  } else if (platform === 'twitter') {
-    // Twitter tokens long-lived; refresh if revoked (assume refresh_token exists)
-    newToken = user.oauthTokens.twitter.refreshToken; // Placeholder—implement per Twitter API
+    const response = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.accessToken}`);
+    newToken = response.data.access_token;
   }
-  await db.update(users).set({ oauthTokens: { ...user.oauthTokens, [platform]: { ...user.oauthTokens[platform], accessToken: newToken } } }).where(eq(users.id, user.id));
-  res.json({ success: true, newToken });
+  await db.update(users).set({ oauthTokens: { ...user.oauthTokens, [platform]: newToken } }).where(eq(users.id, user.id));
+  res.json({ refreshed: true });
 });
+
 // Env check for secrets (add to validation ~Ln 130)
 if (!process.env.TWITTER_CLIENT_ID) throw new Error('Missing TWITTER_CLIENT_ID for OAuth');
 
-app.post('/api/post', requireAuth, async (req, res) => {
+app.post('/api/post', requireAuth, async (req: Request, res: Response) => {
   const { content, platform } = req.body;
   // Check quota first (from above)
+  postingQueue.add({ userId: req.session.userId, content, platform });
+  await db.update(users).set({ daily_posts: sql`${users.daily_posts} + 1` }).where(eq(users.id, req.session.userId));
+  res.json({ success: true });
+});
+
+  // Refresh (Instagram example)
+if (platform === 'instagram' && user.oauthTokens.instagram.expires < Date.now()) {
+  const resp = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.oauthTokens.instagram.accessToken}`);
+  await db.update(users).set({ oauthTokens: { ...user.oauthTokens, instagram: { accessToken: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) } } }).where(eq(users.id, user.id));
+  req.session.oauthTokens = user.oauthTokens;
+}
+// Processor
+if (!global.queueInterval) global.queueInterval = setInterval(() => postingQueue.process(), 5000);
 
   postingQueue.// Token refresh from research (e.g., Instagram GET, LinkedIn POST)
 const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
 const tokens = user.oauthTokens[platform.toLowerCase()] || {};
+const quotas = user.subscriptionActive ? { twitter: 90, instagram: 90 /* etc. */ } : { twitter: 10, instagram: 10 /* etc. */ }; if (user[daily_posts_${platform}] >= quotas[platform]) return res.status(429).json({ error: 'Quota exceeded' });
 if (tokens.expires < Date.now()) {
   let newToken;
   if (platform.toLowerCase() === 'instagram') {
@@ -153,8 +169,8 @@ setInterval(async () => {
 declare module 'express-session' {
   interface SessionData {
     userId: number;
-    oauthTokens: any;
-    deviceInfo: any;
+    oauthTokens: : unknown;
+    deviceInfo: : unknown;
     lastSyncAt: string;
   }
 }
@@ -187,6 +203,9 @@ interface CustomRequest extends Request {
 if (!process.env.DATABASE_URL) throw new Error('Missing DATABASE_URL for session store');
 if (!process.env.SESSION_SECRET) {
   throw new Error('Missing required SESSION_SECRET');
+  if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) throw new Error('Missing Twitter OAuth secrets');
+  if (!process.env.INSTAGRAM_CLIENT_ID || !process.env.INSTAGRAM_CLIENT_SECRET) throw new Error('Missing Instagram OAuth secrets');
+// Add for Facebook, LinkedIn, YouTube
   if (!process.env.INSTAGRAM_CLIENT_ID) throw new Error('Missing INSTAGRAM_CLIENT_ID—add in Vercel from Meta Dev Portal');
   if (!process.env.FACEBOOK_CLIENT_ID) throw new Error('Missing FACEBOOK_CLIENT_ID');
   if (!process.env.LINKEDIN_CLIENT_ID) throw new Error('Missing LINKEDIN_CLIENT_ID');
@@ -198,7 +217,7 @@ if (!process.env.SESSION_SECRET) {
 const tokenManager = new TokenManager(storage);
 
 // Initialize Stripe only if secret key is available
-let stripe: any = null;
+let stripe: : unknown = null;
 if (process.env.STRIPE_SECRET_KEY) {
   stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
     apiVersion: "2025-05-28.basil",
@@ -206,28 +225,23 @@ if (process.env.STRIPE_SECRET_KEY) {
 }
 
 // Stripe webhook for sub events (public path ~Ln 210)
-app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
+app.post('/api/webhook', express.raw({ type: 'application/json' }), (req: Request, res: Response) => {
+  const sig = req.headers['stripe-signature'] as string;
   let event;
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) { return res.status(400).send(`Webhook Error: ${err.message}`); }
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET || '');
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${(err as Error).message}`);
+  }
   if (event.type === 'customer.subscription.created') {
-    const sub = event.data.object;
-    // Handle gift certs for promo (schema ~Ln 5)
-if (sub.metadata.giftCode) {
-  await db.insert(giftCertificates).values({ code: sub.metadata.giftCode, userId: /* from sub.customer */ });
-}
-// Add stripeCustomerId if missing (migration stub)
-if (!user.stripeCustomerId) {
-  await db.update(users).set({ stripeCustomerId: sub.customer }).where(eq(users.id, /* from DB lookup */ ));
-}
-    await db.update(users).set({ subscriptionPlan: sub.items.data[0].plan.nickname.toLowerCase(), subscriptionActive: true }).where(eq(users.stripeCustomerId, sub.customer)); // Assume DB has stripeCustomerId
+    const sub = event.data.object as any;
+    await db.update(users).set({ subscriptionActive: true, subscriptionPlan: sub.items.data[0].plan.nickname }).where(eq(users.stripeCustomerId, sub.customer));
   } else if (event.type === 'customer.subscription.deleted') {
-    await db.update(users).set({ subscriptionPlan: 'cancelled', subscriptionActive: false }).where(eq(users.stripeCustomerId, event.data.object.customer));
+    await db.update(users).set({ subscriptionActive: false }).where(eq(users.stripeCustomerId, event.data.object.customer as string));
   }
   res.json({ received: true });
 });
+
 if (!process.env.STRIPE_WEBHOOK_SECRET) console.warn('Missing STRIPE_WEBHOOK_SECRET—add in Vercel for sub handling');
 
 // Configure SendGrid if available
@@ -236,13 +250,13 @@ if (process.env.SENDGRID_API_KEY) {
 }
 
 // Initialize Twilio only if credentials are available
-let twilioClient: any = null;
+let twilioClient: : unknown = null;
 if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 }
 
 // SURGICAL FIX: Enhanced subscription middleware with live database checks
-const requirePaidSubscription = async (req: any, res: any, next: any) => {
+const requirePaidSubscription = async (req: : unknown, res: : unknown, next: : unknown) => {
   // Allow wizard and subscription endpoints to be public
   const publicPaths = [
     '/api/subscription-plans',
@@ -304,7 +318,7 @@ const requirePaidSubscription = async (req: any, res: any, next: any) => {
         req.session.userId = 2;
         req.session.userEmail = user.email;
         await new Promise<void>((resolve) => {
-          req.session.save((err: any) => {
+          req.session.save((err: : unknown) => {
             if (err) console.error('Session save error:', err);
             resolve();
           });
@@ -330,7 +344,7 @@ const requirePaidSubscription = async (req: any, res: any, next: any) => {
     // Verify user exists and has active subscription
     const user = await storage.getUser(userId);
     if (!user) {
-      req.session.destroy((err: any) => {
+      req.session.destroy((err: : unknown) => {
         if (err) console.error('Session destroy error:', err);
       });
       return res.status(401).json({ 
@@ -344,7 +358,7 @@ const requirePaidSubscription = async (req: any, res: any, next: any) => {
       console.log(`🚫 [ACCESS] Blocked cancelled user ${user.id} from accessing ${req.path}`);
       
       // Clear stale session for cancelled user
-      req.session.destroy((err: any) => {
+      req.session.destroy((err: : unknown) => {
         if (err) console.error('Session destroy error:', err);
       });
       
@@ -369,7 +383,7 @@ const requirePaidSubscription = async (req: any, res: any, next: any) => {
     // Refresh session and continue
     req.session.touch();
     next();
-  } catch (error: any) {
+  } catch (error: : unknown) {
     console.error('Subscription auth error:', error);
     return res.status(500).json({ 
       message: "Authentication error",
@@ -380,14 +394,14 @@ const requirePaidSubscription = async (req: any, res: any, next: any) => {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // CRITICAL FIX: Service Worker route with correct MIME type
-  app.get('/sw.js', (req, res) => {
+  app.get('/sw.js', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/javascript');
     res.setHeader('Service-Worker-Allowed', '/');
     res.sendFile(path.join(process.cwd(), 'public', 'sw.js'));
   });
   
   // SURGICAL FIX 3: Enhanced quota status with proper database fields
-  app.get('/api/quota-status', async (req: any, res) => {
+  app.get('/api/quota-status', async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId || 2;
       
@@ -409,6 +423,7 @@ const totalPosts = quotaLimits.total;
 const publishedPosts = user.totalPosts || 0; // Assume DB has totalPosts; add if missing
 const remainingPosts = Math.max(0, totalPosts - publishedPosts);
 const platformsRemaining = Object.fromEntries(Object.entries(quotaLimits.perPlatform).map(([plat, max]) => [plat, max - (user[`published_${plat}`] || 0)])); // Assume per-platform DB fields; add columns
+const quotas = user.subscriptionActive ? { twitter: 90, instagram: 90 /* etc. */ } : { twitter: 10, instagram: 10 /* etc. */ }; if (user[daily_posts_${platform}] >= quotas[platform]) return res.status(429).json({ error: 'Quota exceeded' });
 // Stub for daily reset (integrate with DataCleanupService cron)
 if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   await db.update(users).set({ totalPosts: 0, lastQuotaReset: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, userId));
@@ -480,11 +495,16 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
     const quotaManager = QuotaPersistenceManager.getInstance();
     
     // Enable quota middleware on critical endpoints
-    app.use('/api/enforce-auto-posting', async (req: any, res: any, next: any) => {
+    app.use('/api/enforce-auto-posting', async (req: : unknown, res: : unknown, next: : unknown) => {
       const quotaCheck = await quotaManager.checkQuota(req.session?.userId || 2, 'facebook', 'post');
+      const quotas = user.subscriptionActive ? { twitter: 90, instagram: 90 /* etc. */ } : { twitter: 10, instagram: 10 /* etc. */ }; if (user[daily_posts_${platform}] >= quotas[platform]) return res.status(429).json({ error: 'Quota exceeded' });
       if (!quotaCheck.allowed) {
         return res.status(429).json({ error: 'Quota exceeded', reason: quotaCheck.reason });
       }
+      // Reset cron (integrate with DataCleanupService ~Ln 35)
+if (new Date().getDate() !== new Date(user.lastReset as Date).getDate()) {
+  await db.update(users).set({ daily_posts: 0, lastReset: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, req.session.userId!));
+}
       next();
     });
     
@@ -547,7 +567,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   };
   
   // Global session establishment middleware - runs on ALL requests
-  app.use(async (req: any, res: any, next: any) => {
+  app.use(async (req: : unknown, res: : unknown, next: : unknown) => {
     // Skip session establishment for static assets
     if (req.path.startsWith('/public/') || req.path.startsWith('/assets/')) {
       return next();
@@ -574,7 +594,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           req.session.userId = 2;
           req.session.userEmail = user.email;
           await new Promise<void>((resolve) => {
-            req.session.save((err: any) => {
+            req.session.save((err: : unknown) => {
               if (err) console.error('Session save error:', err);
               resolve();
             });
@@ -595,7 +615,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   // Quota routes integrated inline - removed external import
   
   // Add global error handler for debugging 500 errors
-  app.use((err: any, req: any, res: any, next: any) => {
+  app.use((err: : unknown, req: : unknown, res: : unknown, next: : unknown) => {
     console.error('Global error handler caught:', err);
     console.error('Error stack:', err.stack);
     console.error('Request URL:', req.url);
@@ -620,7 +640,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   // This avoids duplicate route registration conflicts
 
   // Data deletion status endpoint - Also bypasses auth
-  app.get('/api/deletion-status/:userId', (req, res) => {
+  app.get('/api/deletion-status/:userId', (req: Request, res: Response) => {
     const { userId } = req.params;
     res.send(`
       <html>
@@ -640,7 +660,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   // CRITICAL: Move auth routes BEFORE middleware to prevent 404s
   
   // SURGICAL FIX 1: Authentication Routes (Fix 404s, Add Session Regeneration)
-  app.post('/api/auth/login', async (req: any, res) => {
+  app.post('/api/auth/login', async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
       console.log('🔐 [AUTH] Login attempt:', { email, sessionId: req.sessionID });
@@ -651,7 +671,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         if (user && password === 'Tw33dl3dum!') {
           // CRITICAL: Session regeneration to prevent fixation attacks (2025 OWASP)
           await new Promise<void>((resolve, reject) => {
-            req.session.regenerate((err: any) => {
+            req.session.regenerate((err: : unknown) => {
               if (err) reject(err);
               else resolve();
             });
@@ -663,7 +683,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           
           // Force session save
           await new Promise<void>((resolve, reject) => {
-            req.session.save((err: any) => {
+            req.session.save((err: : unknown) => {
               if (err) reject(err);
               else resolve();
             });
@@ -697,7 +717,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // SURGICAL FIX: Add missing signup endpoint
-  app.post('/api/auth/signup', async (req: any, res) => {
+  app.post('/api/auth/signup', async (req: Request, res: Response) => {
     try {
       const { email, password, phone, planId } = req.body;
       console.log('🔐 [SIGNUP] Registration attempt:', { email, planId, sessionId: req.sessionID });
@@ -736,7 +756,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
     }
   });
 
-  app.post('/api/refresh-oauth', requireAuth, async (req, res) => {
+  app.post('/api/refresh-oauth', requireAuth, async (req: Request, res: Response) => {
   const { platform } = req.body;
   const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
   let newToken;
@@ -744,7 +764,9 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
     // From research: Use Graph API to refresh long-lived token
     const response = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.accessToken}`);
     newToken = response.data.access_token;
-  } else if (platform === 'linkedin') {
+  } 
+  
+  else if (platform === 'linkedin') {
     // From research: Refresh via OAuth 2.0 for partners
     const response = await axios.post('https://www.linkedin.com/oauth/v2/accessToken', {
       grant_type: 'refresh_token',
@@ -759,14 +781,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 });
 
   // SURGICAL FIX 1b: Session invalidation endpoint for cancelled subscriptions
-  app.post('/api/auth/invalidate-session', async (req: any, res) => {
+  app.post('/api/auth/invalidate-session', async (req: Request, res: Response) => {
     try {
       if (req.session) {
         const userId = req.session.userId;
         
         // Destroy session
         await new Promise<void>((resolve, reject) => {
-          req.session.destroy((err: any) => {
+          req.session.destroy((err: : unknown) => {
             if (err) reject(err);
             else resolve();
           });
@@ -791,7 +813,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   app.use(passport.initialize());
   app.use(passport.session());
   app.get('/auth/twitter', passport.authenticate('twitter'));
-  app.get('/auth/twitter/callback', passport.authenticate('twitter', { failureRedirect: '/' }), (req, res) => {
+  app.get('/auth/twitter/callback', passport.authenticate('twitter', { failureRedirect: '/' }), (req: Request, res: Response) => {
   req.session.userId = req.user.id; // Save for sessions
   res.redirect('/dashboard');
 });
@@ -812,7 +834,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   oauthService.initializeOAuthRoutes();
 
   // Real-time SSE endpoint for subscription status updates
-  app.get('/api/subscription-status-sse', async (req: any, res) => {
+  app.get('/api/subscription-status-sse', async (req: Request, res: Response) => {
     const userId = req.session?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required' });
@@ -870,7 +892,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // SURGICAL FIX 4: Enhanced subscription cancellation with session/quota interconnections
-  app.post('/api/cancel-subscription', async (req: any, res) => {
+  app.post('/api/cancel-subscription', async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId;
       if (!userId) {
@@ -970,7 +992,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       // 5. Destroy current session
       if (req.session) {
         await new Promise<void>((resolve, reject) => {
-          req.session.destroy((err: any) => {
+          req.session.destroy((err: : unknown) => {
             if (err) reject(err);
             else resolve();
           });
@@ -996,12 +1018,12 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Global error and request logging middleware
-  app.use((req: any, res: any, next: any) => {
+  app.use((req: : unknown, res: : unknown, next: : unknown) => {
     const originalSend = res.send;
     const originalJson = res.json;
     
     // Log all 400-level errors
-    res.send = function(data: any) {
+    res.send = function(data: : unknown) {
       if (res.statusCode >= 400 && res.statusCode < 500) {
         console.log('4xx Error Details:', {
           method: req.method,
@@ -1017,7 +1039,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       return originalSend.call(this, data);
     };
     
-    res.json = function(data: any) {
+    res.json = function(data: : unknown) {
       if (res.statusCode >= 400 && res.statusCode < 500) {
         console.log('4xx JSON Error Details:', {
           method: req.method,
@@ -1037,7 +1059,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Session debugging middleware - log session details
-  app.use(async (req: any, res: any, next: any) => {
+  app.use(async (req: : unknown, res: : unknown, next: unknown) => {
     // Skip session debugging for certain endpoints
     const skipPaths = ['/api/establish-session', '/api/webhook', '/manifest.json', '/uploads', '/api/facebook/data-deletion', '/api/deletion-status'];
     if (skipPaths.some(path => req.url.startsWith(path))) {
@@ -1077,11 +1099,11 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
     next();
   });
 
-  configuredPassport.serializeUser((user: any, done) => {
+  configuredPassport.serializeUser((user: unknown, done) => {
     done(null, user);
   });
 
-  configuredPassport.deserializeUser((user: any, done) => {
+  configuredPassport.deserializeUser((user: unknown, done) => {
     done(null, user);
   });
 
@@ -1095,7 +1117,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
     destination: (req, file, cb) => {
       cb(null, uploadsDir);
     },
-    filename: (req: any, file, cb) => {
+    filename: (req: unknown, file, cb) => {
       const ext = path.extname(file.originalname);
       const filename = `${req.session.userId}_${Date.now()}${ext}`;
       cb(null, filename);
@@ -1117,7 +1139,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Resilient authentication middleware with database connectivity handling
-  const requireAuth = async (req: any, res: any, next: any) => {
+  const requireAuth = async (req: unknown, res: unknown, next: unknown) => {
     console.log(`🔍 Session Debug - ${req.method} ${req.path}`);
     console.log(`📋 Session ID: ${req.sessionID || 'NONE'}`);
     console.log(`📋 User ID: ${req.session?.userId || 'anonymous'}`);
@@ -1144,7 +1166,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       // Save session immediately
       try {
         await new Promise((resolve, reject) => {
-          req.session.save((err: any) => {
+          req.session.save((err: : unknown) => {
             if (err) reject(err);
             else resolve(true);
           });
@@ -1166,7 +1188,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       
       if (!user) {
         // Clear invalid session
-        req.session.destroy((err: any) => {
+        req.session.destroy((err: : unknown) => {
           if (err) console.error('Session destroy error:', err);
         });
         return res.status(401).json({ message: "User account not found" });
@@ -1175,7 +1197,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       // Refresh session
       req.session.touch();
       next();
-    } catch (error: any) {
+    } catch (error: : unknown) {
       // Handle database connectivity issues gracefully
       if (error.message.includes('Control plane') || error.message.includes('Database timeout') || error.code === 'XX000') {
         console.log('Database connectivity issue in auth, allowing degraded access');
@@ -1194,7 +1216,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
 
   // Facebook OAuth callback endpoint
-  app.post('/api/facebook/callback', async (req, res) => {
+  app.post('/api/facebook/callback', async (req: Request, res: Response) => {
     try {
       const { code } = req.body;
       if (!code) return res.status(400).json({ error: 'Authorization code required' });
@@ -1297,7 +1319,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // LinkedIn OAuth callback endpoint  
-  app.post('/api/linkedin/callback', async (req, res) => {
+  app.post('/api/linkedin/callback', async (req: Request, res: Response) => {
     try {
       const { code } = req.body;
       if (!code) return res.status(400).json({ error: 'Authorization code required' });
@@ -1379,7 +1401,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // LinkedIn token validation endpoint
-  app.get('/api/linkedin/validate-token', requireAuth, async (req, res) => {
+  app.get('/api/linkedin/validate-token', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -1402,7 +1424,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // LinkedIn token refresh endpoint  
-  app.post('/api/linkedin/refresh-token', requireAuth, async (req, res) => {
+  app.post('/api/linkedin/refresh-token', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -1422,7 +1444,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
     }
   });
 
-  app.post('/api/x/callback', async (req, res) => {
+  app.post('/api/x/callback', async (req: Request, res: Response) => {
     try {
       const { code } = req.body;
       if (!code) return res.status(400).json({ error: 'Authorization code required' });
@@ -1513,7 +1535,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // YouTube OAuth - Direct connection implementation (bypassing broken OAuth)
-  app.get('/api/auth/youtube', async (req, res) => {
+  app.get('/api/auth/youtube', async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId;
       if (!userId) {
@@ -1558,7 +1580,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
     }
   });
 
-  app.post('/api/youtube/callback', async (req, res) => {
+  app.post('/api/youtube/callback', async (req: Request, res: Response) => {
     try {
       const { code, state } = req.body;
       
@@ -1836,7 +1858,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   // DISABLED: Conflicting login route - using custom auth in index.ts  
   // Main authentication endpoint
   /*
-  app.post('/api/auth/login', async (req: any, res: Response) => {
+  app.post('/api/auth/login', async (req: : unknown, res: Response) => {
     try {
       const { phone, password } = req.body;
       
@@ -1856,7 +1878,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           
           // Force session save with callback
           await new Promise<void>((resolve, reject) => {
-            req.session.save((err: any) => {
+            req.session.save((err: : unknown) => {
               if (err) {
                 console.error('Session save error:', err);
                 reject(err);
@@ -1903,7 +1925,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       
       // Force session save with callback
       await new Promise<void>((resolve, reject) => {
-        req.session.save((err: any) => {
+        req.session.save((err: : unknown) => {
           if (err) {
             console.error('Session save error:', err);
             reject(err);
@@ -1928,7 +1950,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         },
         sessionId: req.sessionID
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Login error:', error);
       res.status(500).json({ message: "Error logging in", error: error.message });
     }
@@ -1941,14 +1963,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   app.use(passport.initialize());
   app.use(passport.session());
   app.get('/auth/instagram', passport.authenticate('instagram'));
-  app.get('/auth/instagram/callback', passport.authenticate('instagram', { failureRedirect: '/' }), (req, res) => {
+  app.get('/auth/instagram/callback', passport.authenticate('instagram', { failureRedirect: '/' }), (req: Request, res: Response) => {
   req.session.userId = req.user.id; // Save for sessions
   res.redirect('/dashboard');
 });
 
 
   // Instagram OAuth fix endpoint for user_id: 2
-  app.post('/api/instagram-oauth-fix', requireAuth, async (req: any, res) => {
+  app.post('/api/instagram-oauth-fix', requireAuth, async (req: unknown, res) => {
     try {
       const userId = req.session.userId;
       console.log(`[INSTAGRAM-OAUTH-FIX] Creating Instagram connection for user ${userId}`);
@@ -1960,11 +1982,24 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           error: 'Instagram OAuth fix only available for authorized users'
           // Complete for other platforms
     app.get('/auth/facebook', authenticateFacebook);
-    app.get('/auth/facebook/callback', passport.authenticate('facebook', { failureRedirect: '/' }), async (req, res) => {
+    app.get('/auth/facebook/callback', passport.authenticate('facebook', { failureRedirect: '/' }), async (req: Request, res: Response) => {
     req.session.oauthTokens = { ...req.session.oauthTokens, facebook: { accessToken: req.user.accessToken } };
     await CustomerOnboardingOAuth.completeOnboarding(req.user.id, 'facebook'); // Call service ~Ln 41 for post-login setup (e.g., save connections)
     res.redirect('/dashboard');
 });
+
+app.post('/api/refresh-oauth', requireAuth, async (req: Request, res: Response) => {
+  const { platform } = req.body as { platform: string };
+  const user = await db.select().from(users).where(eq(users.id, req.session.userId!));
+  let newTokens;
+  if (platform === 'instagram') {
+    const resp = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user[0].oauthTokens.instagram.accessToken}`);
+    newTokens = { accessToken: resp.data.access_token };
+  } // Add for other platforms
+  await db.update(users).set({ oauthTokens: { ...user[0].oauthTokens, [platform]: newTokens } }).where(eq(users.id, req.session.userId!));
+  res.json({ success: true });
+});
+
 // Add for linkedin/youtube similarly using authenticateLinkedIn/authenticateYouTube ~Ln 24
         });
       }
@@ -1973,7 +2008,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       app.use(passport.initialize());
       app.use(passport.session());
       app.get('/auth/facebook', passport.authenticate('facebook'));
-      app.get('/auth/facebook/callback', passport.authenticate('facebook', { failureRedirect: '/' }), (req, res) => {
+      app.get('/auth/facebook/callback', passport.authenticate('facebook', { failureRedirect: '/' }), (req: Request, res: Response) => {
   req.session.userId = req.user.id; // Save for sessions
   res.redirect('/dashboard');
 });
@@ -2074,7 +2109,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Stripe webhook endpoint for payment processing
-  app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
@@ -2088,7 +2123,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
       event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
       console.log(`✅ Webhook signature verified for event: ${event.type}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('❌ Stripe webhook signature verification failed:', err.message);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
@@ -2224,7 +2259,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Seedance webhook endpoint for video generation completion
-  app.post('/api/seedance-webhook', async (req, res) => {
+  app.post('/api/seedance-webhook', async (req: Request, res: Response) => {
     try {
       const { id, status, output, error } = req.body;
       console.log(`🎬 Seedance webhook received: ${id} - ${status}`);
@@ -2257,29 +2292,28 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Get latest generated Veo3 video for preview testing
-  app.get('/api/video/latest-veo3', (req, res) => {
-    checkVideoQuota(req, res, next); next();
-    try {
-      if (global.latestVeo3Video) {
-        console.log(`📹 Serving latest Veo3 video: ${global.latestVeo3Video.url}`);
-        res.json({
-          success: true,
-          video: global.latestVeo3Video
-        });
-      } else {
-        res.json({
-          success: false,
-          message: 'No Veo3 video available yet'
-        });
-      }
-    } catch (error) {
-      console.error('Error serving latest video:', error);
-      res.status(500).json({ error: 'Failed to get latest video' });
+  app.get('/api/video/latest-veo3', (req: Request, res: Response) => {
+  try {
+    if (global.latestVeo3Video) {
+      console.log(`📹 Serving latest Veo3 video: ${global.latestVeo3Video.url}`);
+      res.json({
+        success: true,
+        video: global.latestVeo3Video
+      });
+    } else {
+      res.json({
+        success: false,
+        message: 'No Veo3 video available yet'
+      });
     }
-  });
+  } catch (error) {
+    console.error('Error serving latest video:', error);
+    res.status(500).json({ error: 'Failed to get latest video' });
+  }
+});
 
   // Video preview endpoint for Art Director generated content
-  app.get('/video-preview/:videoId', async (req, res) => {
+  app.get('/video-preview/:videoId', async (req: Request, res: Response) => {
     try {
       const { videoId } = req.params;
       console.log(`🎬 Video preview request for: ${videoId}`);
@@ -2302,7 +2336,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Device-agnostic session synchronization endpoint
-  app.post('/api/sync-session', async (req, res) => {
+  app.post('/api/sync-session', async (req: Request, res: Response) => {
     try {
       const { sessionId, deviceType, lastActivity } = req.body;
       
@@ -2322,7 +2356,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         // In a Redis-backed session store, this would look up the session
         // For now, we'll maintain the current session and add device tracking
         if (req.session) {
-          req.session.deviceType = deviceType || 'unknown';
+          req.session.deviceType = deviceType || ': unknown';
           req.session.lastSyncAt = new Date().toISOString();
           req.session.syncedFrom = sessionId;
         }
@@ -2330,7 +2364,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       
       // Update session with device info
       if (req.session) {
-        req.session.deviceType = deviceType || req.session.deviceType || 'unknown';
+        req.session.deviceType = deviceType || req.session.deviceType || ': unknown';
         req.session.lastActivity = lastActivity || new Date().toISOString();
       }
       
@@ -2354,7 +2388,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Dedicated login route with explicit cookie setting
-  app.post('/api/login', async (req, res) => {
+  app.post('/api/login', async (req: Request, res: Response) => {
     const { email, phone } = req.body;
     
     console.log('Login request:', {
@@ -2428,7 +2462,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Enhanced session establishment with regeneration security
-  app.post('/api/establish-session', async (req, res) => {
+  app.post('/api/establish-session', async (req: Request, res: Response) => {
     console.log('Session establishment request:', {
       body: req.body,
       sessionId: req.sessionID,
@@ -2459,7 +2493,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
     // Session regeneration for security (prevents session fixation attacks)
     await new Promise<void>((resolve, reject) => {
-      req.session.regenerate((err: any) => {
+      req.session.regenerate((err: unknown) => {
         if (err) {
           console.error('Session regeneration error:', err);
           // Continue without regeneration if it fails
@@ -2478,7 +2512,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         if (user) {
           req.session.userId = userId;
           await new Promise<void>((resolve, reject) => {
-            req.session.save((err: any) => {
+            req.session.save((err: unknown) => {
               if (err) reject(err);
               else resolve();
             });
@@ -2512,7 +2546,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           req.session.userId = targetUser.id;
           req.session.lastActivity = Date.now();
           await new Promise<void>((resolve, reject) => {
-            req.session.save((err: any) => {
+            req.session.save((err: unknown) => {
               if (err) reject(err);
               else resolve();
             });
@@ -2541,7 +2575,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         req.session.subscriptionPlan = knownUser.subscriptionPlan;
         req.session.subscriptionActive = knownUser.subscriptionActive;
         await new Promise<void>((resolve, reject) => {
-          req.session.save((err: any) => {
+          req.session.save((err: unknown) => {
             if (err) reject(err);
             else resolve();
           });
@@ -2606,7 +2640,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Manifest.json route with public access
-  app.get('/manifest.json', (req, res) => {
+  app.get('/manifest.json', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -2636,7 +2670,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
 
   // Create Stripe checkout session for new user signups
-  app.post("/api/create-checkout-session", async (req, res) => {
+  app.post("/api/create-checkout-session", async (req: Request, res: Response) => {
     try {
       const { priceId } = req.body;
       
@@ -2684,14 +2718,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       });
 
       res.json({ url: session.url });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Stripe error:', error);
       res.status(500).json({ message: "Error creating checkout session: " + error.message });
     }
   });
 
   // Send verification code
-  app.post("/api/send-verification-code", async (req, res) => {
+  app.post("/api/send-verification-code", async (req: Request, res: Response) => {
     try {
       const { phone } = req.body;
       
@@ -2725,7 +2759,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           // Fallback for missing Twilio config - log code for testing
           console.log(`Twilio not configured. Verification code for ${phone}: ${code}`);
         }
-      } catch (smsError: any) {
+      } catch (smsError: unknown) {
         console.error('SMS sending failed:', smsError);
         // Still allow verification to proceed - log code for manual verification
         console.log(`SMS failed. Manual verification code for ${phone}: ${code}`);
@@ -2735,7 +2769,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         message: "Verification code sent", 
         testMode: phone.startsWith('+1500555') || !process.env.TWILIO_ACCOUNT_SID 
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('SMS error:', error);
       res.status(500).json({ message: "Error sending verification code" });
     }
@@ -2743,7 +2777,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
   // Complete phone verification and create account
   import TwilioService from '../../../twilio-service'; // Adjust path
-  app.post("/api/complete-phone-verification", async (req, res) => {
+  app.post("/api/complete-phone-verification", async (req: Request, res: Response) => {
     try {
       const { phone, code, password } = req.body;
       
@@ -2799,7 +2833,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       req.session.userId = user.id;
       console.log(`User ID assigned to session: ${user.id} for ${user.email}`);
       
-      req.session.save((err: any) => {
+      req.session.save((err: unknown) => {
         if (err) {
           console.error('Session save error:', err);
           return res.status(500).json({ message: "Account created but login failed" });
@@ -2817,7 +2851,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         });
       });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Phone verification completion error:', error);
       res.status(500).json({ message: "Failed to complete verification" });
     }
@@ -2825,7 +2859,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
   // Verify code and create user
   // Generate gift certificates endpoint (admin only - based on actual purchase)
-  app.post("/api/generate-gift-certificates", async (req, res) => {
+  app.post("/api/generate-gift-certificates", async (req: Request, res: Response) => {
     try {
       // BULLETPROOF AUTHENTICATION: Require valid user session
       const userId = req.session.userId;
@@ -2859,13 +2893,13 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         instructions: "Users can redeem these at /api/redeem-gift-certificate after logging in"
       });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Gift certificate generation error:', error);
       res.status(500).json({ message: "Certificate generation failed" });
     }
   });
 
-  app.post('/api/onboarding', async (req, res) => {
+  app.post('/api/onboarding', async (req: Request, res: Response) => {
   const { email, password, phone } = req.body;
   const existing = await db.select().from(users).where(eq(users.email, email)); // FIXED: Uniqueness check
   if (existing.length > 0) return res.status(400).json({ error: 'Email in use' });
@@ -2877,7 +2911,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 });
 
   // CRITICAL FIX: Consolidated OAuth callback route (HIGH SEVERITY - eliminates duplicates)
-  app.get('/auth/callback', async (req: any, res) => {
+  app.get('/auth/callback', async (req: Request, res: Response) => {
     try {
       const { OAuthConsolidationManager } = await import('./middleware/oauthConsolidation');
       const oauthManager = OAuthConsolidationManager.getInstance();
@@ -2896,7 +2930,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // CRITICAL FIX: Enhanced subscription cancellation with session invalidation
-  app.post('/api/cancel-subscription', requireAuth, async (req: any, res) => {
+  app.post('/api/cancel-subscription', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       
@@ -2930,7 +2964,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         redirectTo: '/api/login'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('🚨 [CANCEL] Cancellation failed:', error);
       res.status(500).json({
         error: 'Cancellation failed',
@@ -2940,7 +2974,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Gift certificate redemption endpoint - CREATES NEW ISOLATED USER ACCOUNT
-  app.post("/api/redeem-gift-certificate", async (req, res) => {
+  app.post("/api/redeem-gift-certificate", async (req: Request, res: Response) => {
     try {
       const { code, email, password, phone } = req.body;
       
@@ -3074,14 +3108,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         }
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Gift certificate redemption error:', error);
       res.status(500).json({ message: "Certificate redemption failed: " + error.message });
     }
   });
 
   // Get all gift certificates (admin only)
-  app.get("/api/admin/gift-certificates", async (req, res) => {
+  app.get("/api/admin/gift-certificates", async (req: Request, res: Response) => {
     try {
       // BULLETPROOF AUTHENTICATION: Require valid user session
       const userId = req.session.userId;
@@ -3092,14 +3126,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       const certificates = await storage.getAllGiftCertificates();
       res.json({ certificates });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Gift certificates retrieval error:', error);
       res.status(500).json({ message: "Failed to retrieve gift certificates" });
     }
   });
 
   // Get gift certificate action logs (admin only)
-  app.get("/api/admin/gift-certificate-logs/:certificateCode", async (req, res) => {
+  app.get("/api/admin/gift-certificate-logs/:certificateCode", async (req: Request, res: Response) => {
     try {
       // BULLETPROOF AUTHENTICATION: Require valid user session
       const userId = req.session.userId;
@@ -3111,14 +3145,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       const logs = await storage.getGiftCertificateActionLogByCode(certificateCode);
       res.json({ logs });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Gift certificate logs retrieval error:', error);
       res.status(500).json({ message: "Failed to retrieve certificate logs" });
     }
   });
 
   // Get user's gift certificate actions
-  app.get("/api/my-gift-certificate-actions", async (req, res) => {
+  app.get("/api/my-gift-certificate-actions", async (req: Request, res: Response) => {
     try {
       // BULLETPROOF AUTHENTICATION: Require valid user session
       const userId = req.session.userId;
@@ -3143,7 +3177,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         }
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('User gift certificate actions retrieval error:', error);
       res.status(500).json({ message: "Failed to retrieve gift certificate actions" });
     }
@@ -3153,7 +3187,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
 
   // Data export endpoint for local development migration
-  app.get("/api/export-data", async (req, res) => {
+  app.get("/api/export-data", async (req: Request, res: Response) => {
     try {
       console.log('Data exported');
       
@@ -3218,7 +3252,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         }
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Data export error:', error);
       res.status(500).json({ 
         error: "Export failed", 
@@ -3229,7 +3263,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // User status endpoint - properly validate sessions
-  app.get("/api/user-status", async (req, res) => {
+  app.get("/api/user-status", async (req: Request, res: Response) => {
     try {
       console.log(`🔍 User status check - Session ID: ${req.sessionID}, User ID: ${req.session?.userId}`);
       
@@ -3277,7 +3311,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         sessionActive: true
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('User status check error:', error);
       res.status(500).json({ 
         authenticated: false, 
@@ -3288,7 +3322,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Add quota status endpoint BEFORE other middleware that causes conflicts
-  app.get('/api/quota-status', (req: any, res, next) => {
+  app.get('/api/quota-status', (req: Request, res: Response) => {
     console.log('🎯 QUOTA STATUS ENDPOINT HIT - Working correctly!');
     res.setHeader('Content-Type', 'application/json');
     fs.unlinkSync(metaPath); // Cleanup after serving (risky—add error handling if prod)
@@ -3311,7 +3345,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // OAuth token refresh endpoint for automatic token validation and refresh
-  app.post("/api/oauth/refresh/:platform", async (req, res) => {
+  app.post("/api/oauth/refresh/:platform", async (req: Request, res: Response) => {
     try {
       const { platform } = req.params;
       const userId = req.session?.userId;
@@ -3373,7 +3407,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           : `${platform} token refresh failed - ${refreshResult.error}`
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error(`[OAUTH-REFRESH] Error refreshing ${req.params.platform}:`, error);
       res.status(500).json({ 
         error: "OAuth refresh failed", 
@@ -3384,7 +3418,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // SMS verification code sending endpoint with Twilio integration
-  app.post("/api/send-sms-code", async (req, res) => {
+  app.post("/api/send-sms-code", async (req: Request, res: Response) => {
     try {
       const { phone } = req.body;
       
@@ -3409,7 +3443,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         code: '123456' // Remove in production
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('SMS sending error:', error);
       res.status(500).json({ error: "Failed to send SMS: " + error.message });
     }
@@ -3418,35 +3452,30 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
 
   // Facebook data deletion status endpoint
-  app.get("/api/facebook/data-deletion-status", async (req, res) => {
-    try {
-      const { id } = req.query;
-      
-      if (!id) {
-        return res.status(400).json({ error: "Missing user ID parameter" });
-      }
-
-      // Check if Facebook user still has connections by platform user ID
-      const allConnections = await storage.getPlatformConnectionsByPlatformUserId(id as string);
-      const socialConnections = allConnections.filter(conn => 
-        conn.platform === 'facebook' || conn.platform === 'instagram'
-      );
-
-      res.json({
-        status: socialConnections.length === 0 ? "completed" : "in_progress",
-        message: socialConnections.length === 0 
-          ? "All Facebook and Instagram data has been deleted" 
-          : "Data deletion in progress",
-        timestamp: new Date().toISOString()
-      });
-
-    } catch (error: any) {
-      console.error('Facebook data deletion status error:', error);
-      res.status(500).json({ error: "Status check failed" });
+  app.get("/api/facebook/data-deletion-status", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.query;
+    if (!id) {
+      return res.status(400).json({ error: "Missing user ID parameter" });
     }
-  });
+    const allConnections = await storage.getPlatformConnectionsByPlatformUserId(id as string);
+    const socialConnections = allConnections.filter(conn => 
+      conn.platform === 'facebook' || conn.platform === 'instagram'
+    );
+    res.json({
+      status: socialConnections.length === 0 ? "completed" : "in_progress",
+      message: socialConnections.length === 0 
+        ? "All Facebook and Instagram data has been deleted" 
+        : "Data deletion in progress",
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Facebook data deletion status error:', error);
+    res.status(500).json({ error: "Status check failed" });
+  }
+});
 
-  app.post("/api/verify-and-signup", async (req, res) => {
+  app.post("/api/verify-and-signup", async (req: Request, res: Response) => {
     try {
       const { email, password, phone, code } = req.body;
       
@@ -3490,7 +3519,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       req.session.userId = user.id;
       req.session.userEmail = user.email;
       
-      req.session.save((err: any) => {
+      req.session.save((err: : unknown) => {
         if (err) {
           console.error('Session save error during signup:', err);
         }
@@ -3508,14 +3537,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           message: "Account created successfully"
         });
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Signup error:', error);
       res.status(500).json({ message: "Error creating account" });
     }
   });
 
   // Public session endpoint for anonymous access - allows frontend to get initial session
-  app.get("/api/auth/session", async (req: any, res) => {
+  app.get("/api/auth/session", async (req: Request, res: Response) => {
     try {
       console.log(`🔍 Public session check - Session ID: ${req.sessionID}, User ID: ${req.session?.userId}`);
       
@@ -3555,7 +3584,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Public session establishment endpoint for auto-login
-  app.post("/api/auth/establish-session", async (req: any, res) => {
+  app.post("/api/auth/establish-session", async (req: Request, res: Response) => {
     try {
       console.log(`🔍 Session establishment - Session ID: ${req.sessionID}, User ID: ${req.session?.userId}`);
       
@@ -3583,7 +3612,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       
       // Session regeneration for security before establishing new session
       await new Promise<void>((resolve, reject) => {
-        req.session.regenerate((err: any) => {
+        req.session.regenerate((err: : unknown) => {
           if (err) {
             console.error('Session regeneration error:', err);
             resolve();
@@ -3603,7 +3632,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         
         // Force session save with callback
         await new Promise<void>((resolve, reject) => {
-          req.session.save((err: any) => {
+          req.session.save((err: : unknown) => {
             if (err) {
               console.error('Session save error:', err);
               reject(err);
@@ -3656,139 +3685,8 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // DISABLED: Conflicting login route - using custom auth in index.ts
-  // Login with phone number  
-  /*
-  app.post("/api/auth/login", async (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    try {
-      const { phone, password } = req.body;
-      
-      console.log(`Login attempt for phone: ${phone}`);
-      
-      if (!phone || !password) {
-        return res.status(400).json({ message: "Phone number and password are required" });
-      }
-
-      // Test account bypass
-      if (phone === '+61412345678' && password === 'test123') {
-        req.session.userId = 999;
-        
-        await new Promise<void>((resolve) => {
-          req.session.save((err: any) => {
-            if (err) console.error('Session save error:', err);
-            resolve();
-          });
-        });
-        
-        return res.json({ user: { id: 999, email: 'test@test.com', phone: '+61412345678' } });
-      }
-
-      // Updated authentication for phone +61424835189 with password123  
-      if (phone === '+61424835189' && password === 'password123') {
-        // Get user data to verify phone number
-        const user = await storage.getUser(2);
-        if (user && user.phone === phone) {
-          req.session.userId = 2;
-          req.session.userEmail = user.email;
-          
-          await new Promise<void>((resolve) => {
-            req.session.save((err: any) => {
-              if (err) console.error('Session save error:', err);
-              resolve();
-            });
-          });
-          
-          console.log(`✅ Phone number verified for ${phone}: ${user.email} (User ID: 2)`);
-          return res.json({ 
-            user: { 
-              id: 2, 
-              email: user.email, 
-              phone: user.phone,
-              subscriptionPlan: user.subscriptionPlan,
-              remainingPosts: user.remainingPosts
-            },
-            sessionEstablished: true,
-            message: `Authentication successful for ${user.email}`
-          });
-        } else {
-          return res.status(400).json({ message: "User phone number verification failed" });
-        }
-      }
-
-      // Find user by phone number (unique identifier)
-      const user = await storage.getUserByPhone(phone);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      const isValidPassword = await bcrypt.compare(password, user.password);
-      if (!isValidPassword) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      // Phone number verification and correction on login
-      let verifiedPhone = user.phone;
-      
-      // Check for most recent SMS verification for this user
-      const { db } = await import('./db');
-      const { verificationCodes } = await import('../shared/schema');
-      const { eq, desc } = await import('drizzle-orm');
-      
-      try {
-        const recentVerification = await db.select()
-          .from(verificationCodes)
-          .where(eq(verificationCodes.verified, true))
-          .orderBy(desc(verificationCodes.createdAt))
-          .limit(1);
-          
-        if (recentVerification.length > 0) {
-          const smsVerifiedPhone = recentVerification[0].phone;
-          
-          // If phone numbers don't match, update to SMS-verified number
-          if (user.phone !== smsVerifiedPhone) {
-            console.log(`Phone number corrected for ${user.email}: ${smsVerifiedPhone} (was ${user.phone})`);
-            
-            // Truncate phone number to fit varchar(15) limit
-            const truncatedPhone = smsVerifiedPhone.substring(0, 15);
-            
-            // Update user record with SMS-verified phone
-            await storage.updateUser(user.id, { phone: truncatedPhone });
-            verifiedPhone = truncatedPhone;
-            
-            // Update any existing post ledger records
-            const { postLedger } = await import('../shared/schema');
-            await db.update(postLedger)
-              .set({ userId: truncatedPhone })
-              .where(eq(postLedger.userId, user.phone as string));
-              
-            console.log(`Updated post ledger records from ${user.phone} to ${smsVerifiedPhone}`);
-          }
-        }
-      } catch (verificationError) {
-        console.log('Phone verification check failed, using stored phone number:', verificationError);
-      }
-
-      // CRITICAL: Assign proper user ID to session
-      req.session.userId = user.id;
-      console.log(`Login successful - User ID assigned to session: ${user.id} for ${user.email}`);
-      
-      await new Promise<void>((resolve) => {
-        req.session.save((err: any) => {
-          if (err) console.error('Session save error:', err);
-          resolve();
-        });
-      });
-
-      res.json({ user: { id: user.id, email: user.email, phone: verifiedPhone } });
-    } catch (error: any) {
-      console.error('Login error:', error);
-      res.status(500).json({ message: "Error logging in" });
-    }
-  });
-  */
-
   // Enhanced logout with HTTP-only cookie clearing and PWA synchronization
-  app.post("/api/auth/logout", async (req: any, res) => {
+  app.post("/api/auth/logout", async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId;
       const sessionId = req.sessionID;
@@ -3819,7 +3717,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       }
       
       // Destroy session from database/store
-      req.session.destroy((err: any) => {
+      req.session.destroy((err: : unknown) => {
         if (err) {
           console.error('Session destruction error:', err);
         }
@@ -3887,11 +3785,11 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         timestamp: new Date().toISOString()
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Logout error:', error);
       
       // Force session clear even on error with expired cookie headers
-      req.session.destroy((err: any) => {
+      req.session.destroy((err: : unknown) => {
         if (err) console.error('Force session destroy error:', err);
       });
       
@@ -3919,7 +3817,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   const userDataCache = new Map();
   const CACHE_DURATION = 30000; // 30 seconds cache
 
-  app.get("/api/user", async (req: any, res) => {
+  app.get("/api/user", async (req: Request, res: Response) => {
     try {
       console.log(`🔍 /api/user - Session ID: ${req.sessionID}, User ID: ${req.session?.userId}`);
       
@@ -3965,14 +3863,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       });
 
       res.json(userData);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Get user error:', error);
       res.status(500).json({ message: "Error fetching user" });
     }
   });
 
   // Instagram OAuth fix endpoint for user_id: 2
-  app.post("/api/user/instagram-fix", async (req: any, res) => {
+  app.post("/api/user/instagram-fix", async (req: Request, res: Response) => {
     try {
       if (!req.session?.userId) {
         return res.status(401).json({ message: "Not authenticated" });
@@ -4085,7 +3983,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Get brand purpose data for a user
-  app.get("/api/brand-purpose", requireActiveSubscription, async (req: any, res) => {
+  app.get("/api/brand-purpose", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const brandPurposeRecord = await storage.getBrandPurposeByUser(req.session.userId);
       
@@ -4094,14 +3992,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       }
 
       res.json(brandPurposeRecord);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Get brand purpose error:', error);
       res.status(500).json({ message: "Error fetching brand purpose" });
     }
   });
 
   // Logo upload endpoint with multer
-  app.post("/api/upload-logo", async (req: any, res) => {
+  app.post("/api/upload-logo", async (req: Request, res: Response) => {
     try {
       // Check Authorization token
       const token = req.headers.authorization;
@@ -4137,14 +4035,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
         res.status(200).json({ message: "Logo uploaded successfully", logoUrl });
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Logo upload error:', error);
       res.status(400).json({ message: "Upload failed" });
     }
   });
 
   // Save brand purpose with comprehensive Strategyzer data
-  app.post("/api/brand-purpose", requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/brand-purpose", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       // Handle Instagram OAuth fix action first
       if (req.body.action === 'instagram-oauth-fix') {
@@ -4289,20 +4187,20 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
       }
 
       res.json(brandPurposeRecord);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Brand purpose error:', error);
       res.status(500).json({ message: "Error saving brand purpose" });
     }
   });
 
   // Auto-save disabled to prevent server flooding
-  app.post("/api/brand-purpose/auto-save", requireAuth, async (req: any, res) => {
+  app.post("/api/brand-purpose/auto-save", requireAuth, async (req: Request, res: Response) => {
     // Auto-save temporarily disabled to prevent excessive requests
     res.json({ success: true });
   });
 
   // Queensland events endpoint for calendar optimization
-  app.get("/api/queensland-events", async (req, res) => {
+  app.get("/api/queensland-events", async (req: Request, res: Response) => {
     try {
       const { getEventsForDateRange } = await import('./queensland-events.js');
       const startDate = new Date().toISOString().split('T')[0];
@@ -4317,7 +4215,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Fix X posts to comply with new hashtag prohibition policy
-  app.post("/api/fix-x-posts", requireAuth, async (req: any, res) => {
+  app.post("/api/fix-x-posts", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const { validateXContent } = await import('./grok.js');
@@ -4365,7 +4263,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Approve individual post for scheduling and add to publish queue
-  app.post("/api/approve-post", requireAuth, async (req: any, res) => {
+  app.post("/api/approve-post", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postId } = req.body;
       const userId = req.session.userId;
@@ -4438,7 +4336,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Edit post content
-  app.put("/api/posts/:postId", requireAuth, async (req: any, res) => {
+  app.put("/api/posts/:postId", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postId } = req.params;
       const { content, edited, editedAt } = req.body;
@@ -4480,7 +4378,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // OAuth refresh endpoints
-  app.post('/api/oauth/refresh/:platform', requireAuth, async (req: any, res) => {
+  app.post('/api/oauth/refresh/:platform', requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.params;
       const userId = req.session.userId;
@@ -4522,30 +4420,30 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   // OAuth Authentication Routes
   
   // API auth routes that redirect to OAuth providers
-  app.get('/api/auth/facebook', requireAuth, (req, res) => {
+  app.get('/api/auth/facebook', requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect/facebook');
   });
   
-  app.get('/api/auth/instagram', requireAuth, (req, res) => {
+  app.get('/api/auth/instagram', requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect/instagram');
   });
   
-  app.get('/api/auth/linkedin', requireAuth, (req, res) => {
+  app.get('/api/auth/linkedin', requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect/linkedin');
   });
   
-  app.get('/api/auth/x', requireAuth, (req, res) => {
+  app.get('/api/auth/x', requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect/x');
   });
   
-  app.get('/api/auth/youtube', requireAuth, (req, res) => {
+  app.get('/api/auth/youtube', requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect/youtube');
   });
   
   // PASSPORT.JS OAUTH ROUTES - SIMPLIFIED AND REINTEGRATED
   
   // Session persistence middleware for OAuth routes
-  app.use('/auth/*', async (req: any, res, next) => {
+  app.use('/auth/*', async (req: : unknown, res, next) => {
     // Ensure session is available during OAuth flow
     if (!req.session?.userId) {
       console.log('⚠️ OAuth initiated without session, attempting recovery...');
@@ -4558,7 +4456,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           req.session.userEmail = mainUser.email;
           
           await new Promise<void>((resolve, reject) => {
-            req.session.save((err: any) => {
+            req.session.save((err: : unknown) => {
               if (err) {
                 console.error('Session save error in OAuth middleware:', err);
                 reject(err);
@@ -4578,7 +4476,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Simple platform connection with username/password
-  app.post("/api/connect-platform-simple", requireAuth, async (req: any, res) => {
+  app.post("/api/connect-platform-simple", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform, username, password } = req.body;
       const userId = req.session.userId;
@@ -4612,7 +4510,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
           default:
             throw new Error(`Platform ${platform} not supported`);
         }
-      } catch (authError: any) {
+      } catch (authError: : unknown) {
         console.error(`${platform} authentication failed:`, authError.message);
         return res.status(401).json({ 
           message: `Authentication failed for ${platform}. Please check your credentials.` 
@@ -4642,7 +4540,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Disconnect platform
-  app.post("/api/disconnect-platform", requireAuth, async (req: any, res) => {
+  app.post("/api/disconnect-platform", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.body;
       const connections = await storage.getPlatformConnectionsByUser(req.session.userId);
@@ -4661,7 +4559,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // OAuth Token Refresh API Routes
-  app.post("/api/oauth/refresh/:platform", requireAuth, async (req: any, res) => {
+  app.post("/api/oauth/refresh/:platform", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.params;
       const userId = req.session.userId?.toString();
@@ -4695,7 +4593,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Validate all platform tokens
-  app.get("/api/oauth/validate-all", requireAuth, async (req: any, res) => {
+  app.get("/api/oauth/validate-all", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId?.toString();
       if (!userId) {
@@ -4738,7 +4636,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Auto-refresh expired tokens
-  app.post("/api/oauth/auto-refresh", requireAuth, async (req: any, res) => {
+  app.post("/api/oauth/auto-refresh", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId?.toString();
       if (!userId) {
@@ -4790,7 +4688,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   });
 
   // Supercharged Strategyzer-based guidance using Grok
-  app.post("/api/generate-guidance", requireAuth, async (req: any, res) => {
+  app.post("/api/generate-guidance", requireAuth, async (req: Request, res: Response) => {
     try {
       const { brandName, productsServices, corePurpose, audience, jobToBeDone, motivations, painPoints } = req.body;
       
@@ -4846,7 +4744,7 @@ Format your response as a strategic consultant would - direct, insightful, and i
           guidance = await Promise.race([aiPromise, timeoutPromise]) as string;
           console.log('Strategyzer analysis completed successfully');
           
-        } catch (aiError: any) {
+        } catch (aiError: : unknown) {
           console.error('Strategyzer analysis error:', aiError);
           
           // Comprehensive fallback using Strategyzer framework
@@ -4895,7 +4793,7 @@ Continue building your Value Proposition Canvas systematically.`;
       }
 
       res.json({ guidance });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Strategyzer guidance error:', error);
       res.json({ 
         guidance: "## STRATEGYZER ANALYSIS UNAVAILABLE\n\nTemporary system issue. Your brand foundation analysis will resume shortly. Continue completing the form fields." 
@@ -4904,7 +4802,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Analytics endpoint
-  app.get("/api/analytics/monthly", requireActiveSubscription, async (req: any, res) => {
+  app.get("/api/analytics/monthly", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const posts = await storage.getPostsByUser(userId);
@@ -4966,7 +4864,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // OAuth token management endpoints
-  app.get('/api/oauth/tokens', requireAuth, async (req: any, res: any) => {
+  app.get('/api/oauth/tokens', requireAuth, async (req: Request, res: Response) => {
     try {
       const tokens = await tokenManager.getUserTokens(req.session.userId);
       res.json(tokens);
@@ -4976,7 +4874,7 @@ Continue building your Value Proposition Canvas systematically.`;
     }
   });
 
-  app.post('/api/oauth/refresh', requireAuth, async (req: any, res: any) => {
+  app.post('/api/oauth/refresh', requireAuth, async (req: Request, res: Response) => {
     try {
       const { provider } = req.body;
       const refreshedToken = await tokenManager.refreshAccessToken(req.session.userId, provider);
@@ -4987,7 +4885,7 @@ Continue building your Value Proposition Canvas systematically.`;
     }
   });
 
-  app.post('/api/oauth/revoke', requireAuth, async (req: any, res: any) => {
+  app.post('/api/oauth/revoke', requireAuth, async (req: Request, res: Response) => {
     try {
       const { provider } = req.body;
       const success = await tokenManager.revokeToken(req.session.userId, provider);
@@ -4998,7 +4896,7 @@ Continue building your Value Proposition Canvas systematically.`;
     }
   });
 
-  app.get('/api/oauth/status', requireAuth, async (req: any, res: any) => {
+  app.get('/api/oauth/status', requireAuth, async (req: Request, res: Response) => {
     try {
       const tokens = await tokenManager.getUserTokens(req.session.userId);
       const status: Record<string, any> = {};
@@ -5024,7 +4922,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Token validation endpoint for all platforms
-  app.get('/api/oauth/validate-tokens', async (req: CustomRequest, res: Response) => {
+  app.get('/api/oauth/validate-tokens', async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId ? req.session.userId.toString() : '1';
       const platforms = ['facebook', 'instagram', 'linkedin', 'x', 'youtube'];
@@ -5065,7 +4963,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Simple platform connection with customer credentials
-  app.post("/api/connect-platform-simple", requireAuth, async (req: any, res) => {
+  app.post("/api/connect-platform-simple", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform, username, password } = req.body;
       const userId = req.session.userId;
@@ -5125,7 +5023,7 @@ Continue building your Value Proposition Canvas systematically.`;
           message: `${platform} connected successfully`
         });
 
-      } catch (authError: any) {
+      } catch (authError: : unknown) {
         console.error(`${platform} authentication failed:`, authError);
         res.status(401).json({ 
           message: `Failed to connect ${platform}. Please check your credentials.`,
@@ -5133,14 +5031,14 @@ Continue building your Value Proposition Canvas systematically.`;
         });
       }
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Platform connection error:', error);
       res.status(500).json({ message: "Error connecting platform" });
     }
   });
 
   // Connect platform (OAuth redirect only - no demo tokens)
-  app.post("/api/connect-platform", requireAuth, async (req: any, res) => {
+  app.post("/api/connect-platform", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.body;
       
@@ -5155,14 +5053,14 @@ Continue building your Value Proposition Canvas systematically.`;
         authUrl: authUrl,
         message: `Redirecting to ${platform} OAuth authentication`
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Platform connection error:', error);
       res.status(500).json({ message: "Error connecting platform" });
     }
   });
 
   // Disconnect platform
-  app.delete("/api/platform-connections/:platform", requireAuth, async (req: any, res) => {
+  app.delete("/api/platform-connections/:platform", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.params;
       
@@ -5182,14 +5080,14 @@ Continue building your Value Proposition Canvas systematically.`;
       await storage.deletePlatformConnection(connection.id);
 
       res.json({ message: `${platform} disconnected successfully` });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Platform disconnection error:', error);
       res.status(500).json({ message: "Error disconnecting platform" });
     }
   });
 
   // Brand posts endpoint with CSP header
-  app.get("/api/brand-posts", requireAuth, async (req: any, res) => {
+  app.get("/api/brand-posts", requireAuth, async (req: Request, res: Response) => {
     // Set specific CSP header for this endpoint
     res.setHeader('Content-Security-Policy', 'connect-src self https://www.google-analytics.com https://api.xai.com https://api.stripe.com https://checkout.stripe.com;');
     
@@ -5213,7 +5111,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Update post content and handle approval with quota deduction
-  app.put("/api/posts/:id", requireAuth, async (req: any, res) => {
+  app.put("/api/posts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const postId = parseInt(req.params.id);
       const { content, status } = req.body;
@@ -5236,7 +5134,7 @@ Continue building your Value Proposition Canvas systematically.`;
       }
 
       // Prepare update data
-      const updateData: any = {};
+      const updateData: : unknown = {};
       if (content !== undefined) {
         updateData.content = content;
       }
@@ -5264,7 +5162,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // PATCH endpoint for post updates (test compatibility)
-  app.patch("/api/posts/:id", requireAuth, async (req: any, res) => {
+  app.patch("/api/posts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const postId = parseInt(req.params.id);
       const { content, status } = req.body;
@@ -5279,7 +5177,7 @@ Continue building your Value Proposition Canvas systematically.`;
       }
 
       // Prepare update data
-      const updateData: any = {};
+      const updateData: : unknown = {};
       if (content !== undefined) {
         updateData.content = content;
       }
@@ -5301,7 +5199,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // POST endpoint for post approval (test compatibility)
-  app.post("/api/posts/:id/approve", requireAuth, async (req: any, res) => {
+  app.post("/api/posts/:id/approve", requireAuth, async (req: Request, res: Response) => {
     try {
       const postId = parseInt(req.params.id);
       const userId = req.session.userId;
@@ -5328,7 +5226,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Mock platform posting endpoint - demonstrates quota deduction after successful posting
-  app.post("/api/post-to-platform/:postId", requireAuth, async (req: any, res) => {
+  app.post("/api/post-to-platform/:postId", requireAuth, async (req: Request, res: Response) => {
     try {
       const postId = parseInt(req.params.postId);
       const { platform } = req.body;
@@ -5377,7 +5275,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // PostQuotaService debug endpoint
-  app.post("/api/quota-debug", requireAuth, async (req: any, res) => {
+  app.post("/api/quota-debug", requireAuth, async (req: Request, res: Response) => {
     try {
       const { email } = req.body;
       const userId = req.session.userId;
@@ -5409,32 +5307,32 @@ Continue building your Value Proposition Canvas systematically.`;
   const rollbackAPI = new RollbackAPI();
   
   // Create snapshot
-  app.post("/api/rollback/create", requireAuth, async (req: any, res) => {
+  app.post("/api/rollback/create", requireAuth, async (req: Request, res: Response) => {
     await rollbackAPI.createSnapshot(req, res);
   });
   
   // List snapshots
-  app.get("/api/rollback/snapshots", requireAuth, async (req: any, res) => {
+  app.get("/api/rollback/snapshots", requireAuth, async (req: Request, res: Response) => {
     await rollbackAPI.listSnapshots(req, res);
   });
   
   // Get rollback status
-  app.get("/api/rollback/status", requireAuth, async (req: any, res) => {
+  app.get("/api/rollback/status", requireAuth, async (req: Request, res: Response) => {
     await rollbackAPI.getStatus(req, res);
   });
   
   // Rollback to snapshot
-  app.post("/api/rollback/:snapshotId", requireAuth, async (req: any, res) => {
+  app.post("/api/rollback/:snapshotId", requireAuth, async (req: Request, res: Response) => {
     await rollbackAPI.rollbackToSnapshot(req, res);
   });
   
   // Delete snapshot
-  app.delete("/api/rollback/:snapshotId", requireAuth, async (req: any, res) => {
+  app.delete("/api/rollback/:snapshotId", requireAuth, async (req: Request, res: Response) => {
     await rollbackAPI.deleteSnapshot(req, res);
   });
 
   // Generate content calendar
-  app.post("/api/generate-content-calendar", requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/generate-content-calendar", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.session.userId);
       if (!user) {
@@ -5500,7 +5398,7 @@ Continue building your Value Proposition Canvas systematically.`;
           generated: createdPosts.length
         }
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Content generation error:', error);
       res.status(500).json({ message: "Error generating content calendar: " + error.message });
     }
@@ -5509,7 +5407,7 @@ Continue building your Value Proposition Canvas systematically.`;
   // Removed conflicting /schedule route to allow React component to render
 
   // Get posts for schedule screen with enhanced data
-  app.get("/api/posts", requireAuth, async (req: any, res) => {
+  app.get("/api/posts", requireAuth, async (req: Request, res: Response) => {
     try {
       const posts = await storage.getPostsByUser(req.session.userId);
       
@@ -5518,7 +5416,7 @@ Continue building your Value Proposition Canvas systematically.`;
       console.log(`📋 Posts API: Retrieved ${postsArray.length} posts for user ${req.session.userId}`);
       
       res.json(postsArray);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Get posts error:', error);
       res.status(500).json({ message: "Error fetching posts" });
     }
@@ -5537,7 +5435,7 @@ Continue building your Value Proposition Canvas systematically.`;
   }
 
   // Emergency deactivation endpoint for cleanup
-  app.post('/api/platform-connections/deactivate', requireAuth, async (req: any, res: Response) => {
+  app.post('/api/platform-connections/deactivate', requireAuth, async (req: Request, res: Response) => {
     try {
       const { connectionId, platform } = req.body;
       const userId = req.session.userId;
@@ -5567,7 +5465,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Emergency activation endpoint for debugging
-  app.post('/api/platform-connections/activate', requireAuth, async (req: any, res: Response) => {
+  app.post('/api/platform-connections/activate', requireAuth, async (req: Request, res: Response) => {
     try {
       const { connectionId, platform } = req.body;
       const userId = req.session.userId;
@@ -5597,7 +5495,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // WORLD-CLASS PLATFORM CONNECTIONS ENDPOINT - Optimized for small business success
-  app.get("/api/platform-connections", requireAuth, async (req: any, res) => {
+  app.get("/api/platform-connections", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const allConnections = await storage.getPlatformConnectionsByUser(userId);
@@ -5685,14 +5583,14 @@ Continue building your Value Proposition Canvas systematically.`;
       console.log(`⚡ Platform connections optimized: ${processingTime}ms total processing time`);
 
       res.json(sortedConnections);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Platform connections optimization error:', error);
       res.status(500).json({ message: "Connection optimization failed", details: error.message });
     }
   });
 
   // ENHANCED: Token refresh endpoint for expired platforms
-  app.post('/api/platform-connections/:platform/refresh', requireAuth, async (req: any, res) => {
+  app.post('/api/platform-connections/:platform/refresh', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const platform = req.params.platform;
@@ -5736,7 +5634,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Instagram OAuth fix - POST to platform connections
-  app.post("/api/platform-connections", requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/platform-connections", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const { action } = req.body;
       const userId = req.session.userId;
@@ -5851,7 +5749,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // YouTube Direct Connection - Immediate working connection
-  app.get("/api/auth/youtube", async (req, res) => {
+  app.get("/api/auth/youtube", async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId;
       if (!userId) {
@@ -5883,7 +5781,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Get failed posts for retry management
-  app.get("/api/failed-posts", requireAuth, async (req: any, res) => {
+  app.get("/api/failed-posts", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -5904,7 +5802,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Manually retry a failed post
-  app.post("/api/retry-post", requireAuth, async (req: any, res) => {
+  app.post("/api/retry-post", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postId } = req.body;
       const userId = req.session.userId;
@@ -5933,7 +5831,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Platform Health Monitoring - Bulletproof Publishing Support
-  app.get("/api/platform-health", requireAuth, async (req: any, res) => {
+  app.get("/api/platform-health", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -5966,7 +5864,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Force platform health repair
-  app.post("/api/repair-connections", requireAuth, async (req: any, res) => {
+  app.post("/api/repair-connections", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -6015,7 +5913,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Bulletproof System Test - Comprehensive reliability testing
-  app.get("/api/bulletproof-test", requireActiveSubscription, async (req: any, res) => {
+  app.get("/api/bulletproof-test", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -6041,7 +5939,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Post Verification and Subscription Deduction - Independent Flow
-  app.post("/api/check-post", async (req: any, res) => {
+  app.post("/api/check-post", async (req: Request, res: Response) => {
     try {
       const { subscriptionId, postId } = req.body;
       
@@ -6067,7 +5965,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Bulk Post Verification - For batch processing
-  app.post("/api/check-posts-bulk", async (req: any, res) => {
+  app.post("/api/check-posts-bulk", async (req: Request, res: Response) => {
     try {
       const { subscriptionId, postIds } = req.body;
       
@@ -6096,7 +5994,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Platform-specific Post Verification
-  app.post("/api/verify-platform-posts", async (req: any, res) => {
+  app.post("/api/verify-platform-posts", async (req: Request, res: Response) => {
     try {
       const { postId, platforms } = req.body;
       
@@ -6126,7 +6024,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Instagram Business API Integration
-  app.post("/api/instagram/setup", requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/instagram/setup", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -6222,7 +6120,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Instagram Test Post
-  app.post("/api/instagram/test-post", requireAuth, async (req: any, res) => {
+  app.post("/api/instagram/test-post", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -6278,7 +6176,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // YouTube OAuth Callback
-  app.post("/api/youtube/callback", async (req: any, res) => {
+  app.post("/api/youtube/callback", async (req: Request, res: Response) => {
     try {
       const { code, state } = req.body;
       const userId = req.session?.userId;
@@ -6378,7 +6276,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // LinkedIn OAuth Callback
-  app.post("/api/linkedin/callback", async (req: any, res) => {
+  app.post("/api/linkedin/callback", async (req: Request, res: Response) => {
     try {
       const { code, state } = req.body;
       const userId = req.session?.userId;
@@ -6505,7 +6403,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // X.AI Credentials Test - Direct API test
-  app.post("/api/grok-test", async (req: any, res) => {
+  app.post("/api/grok-test", async (req: Request, res: Response) => {
     try {
       const { prompt } = req.body;
       
@@ -6544,7 +6442,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Facebook reconnection with proper publishing permissions
-  app.get("/api/reconnect/facebook", requireAuth, async (req: any, res) => {
+  app.get("/api/reconnect/facebook", requireAuth, async (req: Request, res: Response) => {
     try {
       const clientId = process.env.FACEBOOK_APP_ID;
       
@@ -6583,7 +6481,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // X platform integration test (no auth required for testing)
-  app.post("/api/test-x-integration", async (req: any, res) => {
+  app.post("/api/test-x-integration", async (req: Request, res: Response) => {
     try {
       const { xIntegration } = await import('./x-integration');
       const result = await xIntegration.postTweet('TheAgencyIQ X integration test successful! Platform ready for 9:00 AM JST launch! 🚀');
@@ -6600,7 +6498,7 @@ Continue building your Value Proposition Canvas systematically.`;
           message: result.error || "X integration failed"
         });
       }
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('X integration test error:', error);
       res.status(500).json({
         success: false,
@@ -6611,7 +6509,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Auto-posting enforcer - Ensures posts are published within 30-day subscription
-  app.post("/api/enforce-auto-posting", requireAuth, async (req: any, res) => {
+  app.post("/api/enforce-auto-posting", requireAuth, async (req: Request, res: Response) => {
     try {
       const { AutoPostingEnforcer } = await import('./auto-posting-enforcer');
       
@@ -6649,7 +6547,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Auto-post entire 30-day schedule with bulletproof publishing
-  app.post("/api/auto-post-schedule", requireAuth, async (req: any, res) => {
+  app.post("/api/auto-post-schedule", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.session.userId);
       if (!user) {
@@ -6738,7 +6636,7 @@ Continue building your Value Proposition Canvas systematically.`;
 
             console.log(`Auto-posting: Failed to publish post ${post.id} to ${post.platform}: ${result.error}`);
           }
-        } catch (error: any) {
+        } catch (error: : unknown) {
           // Mark post as failed
           await storage.updatePost(post.id, { 
             status: 'failed',
@@ -6771,14 +6669,14 @@ Continue building your Value Proposition Canvas systematically.`;
         bulletproofPublishing: true
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Auto-post schedule error:', error);
       res.status(500).json({ message: "Error auto-posting schedule", error: error.message });
     }
   });
 
   // CMO-Led Brand Domination Strategy Endpoint
-  app.post("/api/generate-cmo-strategy", requireAuth, async (req: any, res) => {
+  app.post("/api/generate-cmo-strategy", requireAuth, async (req: Request, res: Response) => {
     try {
       const { brandPurpose, totalPosts = 52, platforms } = req.body;
       
@@ -6845,14 +6743,14 @@ Continue building your Value Proposition Canvas systematically.`;
         message: "Unstoppable content strategy deployed - ready to annihilate competition and explode sales"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('CMO strategy generation error:', error);
       res.status(500).json({ message: "Error generating CMO strategy: " + error.message });
     }
   });
 
   // Strategic content generation endpoint with waterfall strategyzer methodology
-  app.post("/api/generate-strategic-content", async (req: any, res) => {
+  app.post("/api/generate-strategic-content", async (req: Request, res: Response) => {
     try {
       // Auto-establish session for User ID 2 if not present
       let userId = req.session?.userId;
@@ -6863,7 +6761,7 @@ Continue building your Value Proposition Canvas systematically.`;
             req.session.userId = 2;
             req.session.userEmail = user.email;
             await new Promise<void>((resolve) => {
-              req.session.save((err: any) => {
+              req.session.save((err: : unknown) => {
                 if (err) console.error('Session save error:', err);
                 resolve();
               });
@@ -7017,14 +6915,14 @@ Continue building your Value Proposition Canvas systematically.`;
         targetMarket: 'Queensland SMEs'
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Strategic content generation error:', error);
       res.status(500).json({ message: "Strategic content generation failed", error: error.message });
     }
   });
 
   // Direct transactional strategic content generation (bypassing AI complexity)
-  app.post("/api/test-transactional-posts", requireAuth, async (req: any, res) => {
+  app.post("/api/test-transactional-posts", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       
@@ -7101,14 +6999,14 @@ Continue building your Value Proposition Canvas systematically.`;
         status: 'POST QUOTA DOUBLING ISSUE COMPLETELY RESOLVED'
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Transactional test error:', error);
       res.status(500).json({ message: "Transactional test failed", error: error.message });
     }
   });
 
   // Generate AI-powered schedule using xAI integration
-  app.post("/api/generate-ai-schedule", requireAuth, async (req: any, res) => {
+  app.post("/api/generate-ai-schedule", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platforms } = req.body;
       
@@ -7395,7 +7293,7 @@ Continue building your Value Proposition Canvas systematically.`;
 
       res.json(scheduleData);
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('AI schedule generation error:', error);
       res.status(500).json({ 
         message: "Error generating AI schedule",
@@ -7405,7 +7303,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Create new post
-  app.post("/api/posts", requireAuth, async (req: any, res) => {
+  app.post("/api/posts", requireAuth, async (req: Request, res: Response) => {
     try {
       const postData = insertPostSchema.parse({
         ...req.body,
@@ -7416,28 +7314,28 @@ Continue building your Value Proposition Canvas systematically.`;
       
       const newPost = await storage.createPost(postData);
       res.status(201).json(newPost);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Create post error:', error);
       res.status(400).json({ message: "Error creating post" });
     }
   });
 
   // Update existing post
-  app.put("/api/posts/:id", requireAuth, async (req: any, res) => {
+  app.put("/api/posts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const postId = parseInt(req.params.id);
       const updates = req.body;
       
       const updatedPost = await storage.updatePost(postId, updates);
       res.json(updatedPost);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Update post error:', error);
       res.status(400).json({ message: "Error updating post" });
     }
   });
 
   // Publish post to social media platforms with subscription tracking
-  app.post("/api/publish-post", requireAuth, async (req: any, res) => {
+  app.post("/api/publish-post", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postId, platform } = req.body;
       
@@ -7523,7 +7421,7 @@ Continue building your Value Proposition Canvas systematically.`;
           });
         }
 
-      } catch (publishError: any) {
+      } catch (publishError: : unknown) {
         console.error('Post publishing error:', publishError);
         
         res.status(500).json({ 
@@ -7533,14 +7431,14 @@ Continue building your Value Proposition Canvas systematically.`;
         });
       }
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Publish post error:', error);
       res.status(500).json({ message: "Error publishing post" });
     }
   });
 
   // Approve and publish post with proper allocation tracking
-  app.post("/api/schedule-post", requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/schedule-post", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const { postId, platforms = ['facebook', 'instagram', 'linkedin', 'x', 'youtube'] } = req.body;
       
@@ -7600,7 +7498,7 @@ Continue building your Value Proposition Canvas systematically.`;
           });
         }
 
-      } catch (publishError: any) {
+      } catch (publishError: : unknown) {
         console.error('Post publishing error:', publishError);
         
         res.status(500).json({ 
@@ -7610,14 +7508,14 @@ Continue building your Value Proposition Canvas systematically.`;
         });
       }
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Schedule post error:', error);
       res.status(500).json({ message: "Error processing post scheduling" });
     }
   });
 
   // Retry failed post publication
-  app.post("/api/retry-post", requireAuth, async (req: any, res) => {
+  app.post("/api/retry-post", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postId, platforms } = req.body;
       
@@ -7667,14 +7565,14 @@ Continue building your Value Proposition Canvas systematically.`;
         postId: postId
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Post retry error:', error);
       res.status(500).json({ message: "Error retrying post publication" });
     }
   });
 
   // Post connection repair and diagnosis
-  app.get("/api/connection-repair", requireAuth, async (req: any, res) => {
+  app.get("/api/connection-repair", requireAuth, async (req: Request, res: Response) => {
     try {
       const { ConnectionRepairService } = await import('./connection-repair');
       
@@ -7693,7 +7591,7 @@ Continue building your Value Proposition Canvas systematically.`;
         ]
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Connection repair error:', error);
       res.status(500).json({ 
         success: false,
@@ -7703,7 +7601,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Enhanced OAuth status endpoint with JTBD extraction and refresh capability
-  app.get('/api/oauth-status', requireAuth, async (req: any, res) => {
+  app.get('/api/oauth-status', requireAuth, async (req: Request, res: Response) => {
     try {
       console.log(`🔍 OAuth status check for user ${req.session.userId}`);
       
@@ -7754,7 +7652,7 @@ Continue building your Value Proposition Canvas systematically.`;
       console.log(`✅ OAuth status retrieved: ${onboardingStatus.status.connectionsWithRefresh.length} connections with refresh`);
       res.json(response);
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Enhanced OAuth status error:', error);
       res.status(500).json({ 
         error: 'Failed to get OAuth status',
@@ -7764,7 +7662,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // Test connection endpoint
-  app.post('/api/test-connection', requireAuth, async (req: any, res) => {
+  app.post('/api/test-connection', requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.body;
       const { OAuthFix } = await import('./oauth-fix');
@@ -7777,7 +7675,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // OAuth token refresh endpoint  
-  app.post('/api/oauth-refresh', requireAuth, async (req: any, res) => {
+  app.post('/api/oauth-refresh', requireAuth, async (req: Request, res: Response) => {
     try {
       const { provider } = req.body;
       
@@ -7807,7 +7705,7 @@ Continue building your Value Proposition Canvas systematically.`;
         preventsMidGenFailures: true
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('OAuth refresh error:', error);
       res.status(500).json({ 
         error: 'Failed to refresh OAuth tokens',
@@ -7817,7 +7715,7 @@ Continue building your Value Proposition Canvas systematically.`;
   });
 
   // JTBD guide endpoint
-  app.get('/api/jtbd-guide', requireAuth, async (req: any, res) => {
+  app.get('/api/jtbd-guide', requireAuth, async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.session.userId.toString());
       if (!user) {
@@ -7872,7 +7770,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         autoExtractionAvailable: connections.some(c => c.refreshToken)
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('JTBD guide error:', error);
       res.status(500).json({ 
         error: 'Failed to get JTBD guide',
@@ -7882,7 +7780,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Working post test endpoint
-  app.get('/api/test-working-posts', requireAuth, async (req: any, res) => {
+  app.get('/api/test-working-posts', requireAuth, async (req: Request, res: Response) => {
     try {
       const { WorkingPostTest } = await import('./working-post-test');
       const testResults = await WorkingPostTest.testPostPublishingWithCurrentTokens(req.session.userId);
@@ -7894,7 +7792,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Token validation endpoint
-  app.get('/api/validate-tokens', requireAuth, async (req: any, res) => {
+  app.get('/api/validate-tokens', requireAuth, async (req: Request, res: Response) => {
     try {
       const connections = await storage.getPlatformConnectionsByUser(req.session.userId);
       const { TokenValidator } = await import('./token-validator');
@@ -7905,8 +7803,8 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         validationResults,
         summary: {
           totalConnections: connections.length,
-          validConnections: Object.values(validationResults).filter((r: any) => r.valid).length,
-          needingReconnection: Object.values(validationResults).filter((r: any) => r.needsReconnection).length
+          validConnections: Object.values(validationResults).filter((r: : unknown) => r.valid).length,
+          needingReconnection: Object.values(validationResults).filter((r: : unknown) => r.needsReconnection).length
         }
       });
     } catch (error) {
@@ -7916,7 +7814,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Direct OAuth fix endpoint
-  app.get('/api/oauth-fix-direct', requireAuth, async (req: any, res) => {
+  app.get('/api/oauth-fix-direct', requireAuth, async (req: Request, res: Response) => {
     try {
       const { DirectOAuthFix } = await import('./oauth-fix-direct');
       const tokenStatus = await DirectOAuthFix.testCurrentTokenStatus(req.session.userId);
@@ -7935,7 +7833,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Instagram direct fix endpoint
-  app.get('/api/instagram-fix', requireAuth, async (req: any, res) => {
+  app.get('/api/instagram-fix', requireAuth, async (req: Request, res: Response) => {
     try {
       const { InstagramFixDirect } = await import('./instagram-fix-direct');
       const instagramFix = await InstagramFixDirect.fixInstagramCompletely(req.session.userId);
@@ -7957,7 +7855,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   // await import('./oauth-config');
 
   // OAuth reconnection routes
-  app.get('/auth/facebook/reconnect', requireAuth, (req: any, res, next) => {
+  app.get('/auth/facebook/reconnect', requireAuth, (req: : unknown, res, next) => {
     console.log('Facebook OAuth reconnection initiated for user:', req.session.userId);
     configuredPassport.authenticate('facebook', { 
       scope: ['email', 'pages_manage_posts', 'pages_read_engagement', 'publish_actions'] 
@@ -7966,14 +7864,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
   app.get('/auth/facebook/reconnect/callback', 
     configuredPassport.authenticate('facebook', { failureRedirect: '/oauth-reconnect?error=facebook' }),
-    (req, res) => {
+    (req: Request, res: Response) => {
       console.log('Facebook OAuth reconnection successful');
       res.redirect('/oauth-reconnect?success=facebook');
     }
   );
 
   // LinkedIn OAuth reconnection routes
-  app.get('/auth/linkedin/reconnect', requireAuth, (req: any, res, next) => {
+  app.get('/auth/linkedin/reconnect', requireAuth, (req: : unknown, res, next) => {
     console.log('LinkedIn OAuth reconnection initiated for user:', req.session.userId);
     configuredPassport.authenticate('linkedin', { 
       scope: ['r_liteprofile', 'r_emailaddress', 'w_member_social'] 
@@ -7982,28 +7880,28 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
   app.get('/auth/linkedin/reconnect/callback',
     configuredPassport.authenticate('linkedin', { failureRedirect: '/oauth-reconnect?error=linkedin' }),
-    (req, res) => {
+    (req: Request, res: Response) => {
       console.log('LinkedIn OAuth reconnection successful');
       res.redirect('/oauth-reconnect?success=linkedin');
     }
   );
 
   // X/Twitter OAuth reconnection routes
-  app.get('/auth/twitter/reconnect', requireAuth, (req: any, res, next) => {
+  app.get('/auth/twitter/reconnect', requireAuth, (req: : unknown, res, next) => {
     console.log('X OAuth reconnection initiated for user:', req.session.userId);
     configuredPassport.authenticate('twitter')(req, res, next);
   });
 
   app.get('/auth/twitter/reconnect/callback',
     configuredPassport.authenticate('twitter', { failureRedirect: '/oauth-reconnect?error=twitter' }),
-    (req, res) => {
+    (req: Request, res: Response) => {
       console.log('X OAuth reconnection successful');
       res.redirect('/oauth-reconnect?success=twitter');
     }
   );
 
   // Get subscription usage statistics - CENTRALIZED VERSION
-  app.get("/api/subscription-usage", requireActiveSubscription, async (req: any, res) => {
+  app.get("/api/subscription-usage", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       // Clear cache first to ensure fresh calculations after post deletion
       // Quota cache cleared - removed external service dependency
@@ -8036,14 +7934,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         usagePercentage: quotaStatus.totalPosts > 0 ? Math.round(((quotaStatus.totalPosts - quotaStatus.remainingPosts) / quotaStatus.totalPosts) * 100) : 0
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Subscription usage error:', error);
       res.status(500).json({ message: "Error fetching subscription usage" });
     }
   });
 
   // Enhanced subscription management with single plan enforcement
-  app.get("/api/subscriptions", requireAuth, async (req: any, res) => {
+  app.get("/api/subscriptions", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const user = await storage.getUser(userId);
@@ -8086,14 +7984,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
       res.json(response);
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Subscription retrieval error:', error);
       res.status(500).json({ message: "Error retrieving subscription" });
     }
   });
 
   // Security breach reporting endpoint
-  app.post("/api/security/report-breach", requireAuth, async (req: any, res) => {
+  app.post("/api/security/report-breach", requireAuth, async (req: Request, res: Response) => {
     try {
       const { incidentType, description, affectedPlatforms = [], severity = 'medium' } = req.body;
       
@@ -8115,14 +8013,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         notificationScheduled: "72 hours from detection"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Breach reporting error:', error);
       res.status(500).json({ message: "Failed to report security incident" });
     }
   });
 
   // Get security incidents for admin
-  app.get("/api/security/incidents", async (req, res) => {
+  app.get("/api/security/incidents", async (req: Request, res: Response) => {
     try {
       const { userId } = req.query;
       
@@ -8145,14 +8043,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         });
       }
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Security incidents fetch error:', error);
       res.status(500).json({ message: "Failed to fetch security incidents" });
     }
   });
 
   // Test breach notification endpoint (for verification)
-  app.post("/api/security/test-breach", async (req, res) => {
+  app.post("/api/security/test-breach", async (req: Request, res: Response) => {
     try {
       console.log("🧪 TESTING BREACH NOTIFICATION SYSTEM");
       
@@ -8174,14 +8072,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         note: "This is a test to verify the breach notification system is working"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Test breach notification error:', error);
       res.status(500).json({ message: "Failed to create test security incident" });
     }
   });
 
   // Data cleanup status endpoint
-  app.get("/api/admin/data-cleanup/status", async (req, res) => {
+  app.get("/api/admin/data-cleanup/status", async (req: Request, res: Response) => {
     try {
       const { DataCleanupService } = await import("./data-cleanup");
       const status = DataCleanupService.getCleanupStatus();
@@ -8193,14 +8091,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         description: "Automated data cleanup runs daily at 2 AM"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Data cleanup status error:', error);
       res.status(500).json({ message: "Failed to fetch data cleanup status" });
     }
   });
 
   // Manual data cleanup trigger (admin only)
-  app.post("/api/admin/data-cleanup/trigger", async (req, res) => {
+  app.post("/api/admin/data-cleanup/trigger", async (req: Request, res: Response) => {
     try {
       const { DataCleanupService } = await import("./data-cleanup");
       
@@ -8217,14 +8115,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         }
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Manual data cleanup error:', error);
       res.status(500).json({ message: "Failed to perform data cleanup" });
     }
   });
 
   // Security dashboard endpoint for real-time monitoring
-  app.get("/api/security/dashboard", async (req, res) => {
+  app.get("/api/security/dashboard", async (req: Request, res: Response) => {
     try {
       const allIncidents = Array.from(BreachNotificationService['incidents'].values());
       const now = new Date();
@@ -8273,7 +8171,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
       res.json(securityMetrics);
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Security dashboard error:', error);
       res.status(500).json({ message: "Failed to load security dashboard" });
     }
@@ -8326,7 +8224,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Get AI recommendation with real-time brand purpose analysis
-  app.post("/api/ai-query", async (req: any, res) => {
+  app.post("/api/ai-query", async (req: Request, res: Response) => {
     try {
       const { query, context } = req.body;
       
@@ -8353,7 +8251,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       
       const response = await getAIResponse(query, context, brandPurposeRecord);
       res.json({ response });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('AI query error:', error);
       res.status(500).json({ 
         response: "I encountered an error processing your request. Please try again or contact support if the issue persists."
@@ -8362,7 +8260,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // ENHANCED: Comprehensive subscription cancellation with platform cleanup
-  app.post("/api/cancel-subscription", requireAuth, async (req: any, res) => {
+  app.post("/api/cancel-subscription", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       
@@ -8411,7 +8309,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
           pipelineIntegrationFixed: true
         }
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error("Enhanced cancellation error:", error);
       res.status(500).json({ 
         message: "Enhanced cancellation failed",
@@ -8422,7 +8320,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // ADMIN: Video prompts monitoring endpoint
-  app.get("/api/admin/video-prompts", requireAuth, async (req: any, res) => {
+  app.get("/api/admin/video-prompts", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUser(userId);
@@ -8472,14 +8370,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         status: "monitoring_active"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Video prompts monitoring error:', error);
       res.status(500).json({ message: "Failed to fetch video prompt data" });
     }
   });
 
   // ADMIN: Bulk cancel all active subscriptions (emergency cleanup)
-  app.post("/api/admin/bulk-cancel-subscriptions", requireAuth, async (req: any, res) => {
+  app.post("/api/admin/bulk-cancel-subscriptions", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUser(userId);
@@ -8554,7 +8452,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         });
       }
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error("Bulk cancellation failed:", error);
       res.status(500).json({ 
         message: "Bulk cancellation failed",
@@ -8564,7 +8462,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Test data cleanup endpoint (for testing cancellation functionality)
-  app.post("/api/test-data-cleanup", requireAuth, async (req: any, res) => {
+  app.post("/api/test-data-cleanup", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUser(userId);
@@ -8585,7 +8483,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         message: "Data cleanup test completed successfully",
         results: cleanupResults
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error("Data cleanup test failed:", error);
       res.status(500).json({ 
         message: "Data cleanup test failed",
@@ -8595,7 +8493,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Bulk delete posts endpoint
-  app.delete("/api/posts/bulk", requireAuth, async (req: any, res) => {
+  app.delete("/api/posts/bulk", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postIds, deleteAll = false } = req.body;
       
@@ -8638,7 +8536,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
           message: "Either postIds array or deleteAll=true is required" 
         });
       }
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Bulk delete error:', error);
       res.status(500).json({ 
         success: false, 
@@ -8648,7 +8546,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Replace failed post
-  app.post("/api/replace-post", requireAuth, async (req: any, res) => {
+  app.post("/api/replace-post", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postId } = req.body;
       
@@ -8686,14 +8584,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         post: updatedPost, 
         recommendation: `this post targets ${brandPurposeRecord.audience} to support ${brandPurposeRecord.goals}` 
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Replace post error:', error);
       res.status(500).json({ message: "Error replacing post: " + error.message });
     }
   });
 
   // AI content generation with thinking process
-  app.post("/api/ai/generate-content", async (req, res) => {
+  app.post("/api/ai/generate-content", async (req: Request, res: Response) => {
     try {
       // Require authenticated session
       const userId = req.session.userId;
@@ -8750,14 +8648,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
       const generatedPosts = await generateContentCalendar(contentParams);
       res.json({ posts: generatedPosts });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error("Content generation error:", error);
       res.status(500).json({ message: "Failed to generate content: " + error.message });
     }
   });
 
   // Publish individual post endpoint
-  app.post("/api/publish-post", requireAuth, async (req: any, res) => {
+  app.post("/api/publish-post", requireAuth, async (req: Request, res: Response) => {
     try {
       const { postId, platform } = req.body;
       const userId = req.session.userId;
@@ -8821,7 +8719,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         });
       }
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Post publishing error:', error);
       res.status(500).json({ 
         message: "Error publishing post",
@@ -8831,7 +8729,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Analytics dashboard data
-  app.get("/api/analytics", requireActiveSubscription, async (req: any, res) => {
+  app.get("/api/analytics", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -8857,7 +8755,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       let totalPosts = 0;
       let totalReach = 0;
       let totalEngagement = 0;
-      const platformStats: any[] = [];
+      const platformStats: : unknown[] = [];
 
       // Aggregate analytics data from published posts by platform
       const platformData: Record<string, {posts: number, reach: number, engagement: number, impressions: number}> = {};
@@ -8995,14 +8893,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       };
 
       res.json(analyticsData);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error("Analytics error:", error);
       res.status(500).json({ message: "Failed to load analytics: " + error.message });
     }
   });
 
   // AI Content Generation endpoint for comprehensive tests
-  app.post("/api/generate-ai-content", requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/generate-ai-content", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -9063,7 +8961,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         message: `Generated ${generatedPosts.length} AI-powered posts`
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('AI content generation error:', error);
       res.status(500).json({ 
         message: "AI content generation failed",
@@ -9073,7 +8971,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Yearly analytics dashboard data
-  app.get("/api/yearly-analytics", async (req, res) => {
+  app.get("/api/yearly-analytics", async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId) {
@@ -9259,7 +9157,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       };
 
       res.json(yearlyAnalyticsData);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error("Yearly analytics error:", error);
       res.status(500).json({ message: "Failed to load yearly analytics: " + error.message });
     }
@@ -9268,7 +9166,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   // Duplicate brand purpose endpoint removed - using the one at line 2825 with requireActiveSubscription middleware
 
   // Forgot password with email and phone verification
-  app.post("/api/forgot-password", async (req, res) => {
+  app.post("/api/forgot-password", async (req: Request, res: Response) => {
     try {
       const { email, phone } = req.body;
       
@@ -9339,7 +9237,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         await sgMail.send(msg);
         console.log(`Password reset email sent successfully to ${email}`);
         
-      } catch (emailError: any) {
+      } catch (emailError: : unknown) {
         console.error('SendGrid email error:', emailError);
         
         // Check if it's an authentication error
@@ -9354,14 +9252,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       }
 
       res.json({ message: "If an account exists, a reset link has been sent" });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Forgot password error:', error);
       res.status(500).json({ message: "Error processing request" });
     }
   });
 
   // Validate reset token
-  app.post("/api/validate-reset-token", async (req, res) => {
+  app.post("/api/validate-reset-token", async (req: Request, res: Response) => {
     try {
       const { token, email } = req.body;
       
@@ -9380,14 +9278,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       }
 
       res.json({ message: "Token is valid" });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Token validation error:', error);
       res.status(500).json({ message: "Error validating token" });
     }
   });
 
   // Reset password
-  app.post("/api/reset-password", async (req, res) => {
+  app.post("/api/reset-password", async (req: Request, res: Response) => {
     try {
       const { token, email, password } = req.body;
       
@@ -9428,17 +9326,17 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
       console.log(`Password reset successful for user: ${email}`);
       res.json({ message: "Password reset successful" });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Reset password error:', error);
       res.status(500).json({ message: "Error resetting password" });
     }
   });
 
   // Update profile
-  app.put("/api/profile", requireAuth, async (req: any, res) => {
+  app.put("/api/profile", requireAuth, async (req: Request, res: Response) => {
     try {
       const { phone, password } = req.body;
-      const updates: any = {};
+      const updates: : unknown = {};
       
       if (phone) {
         updates.phone = phone;
@@ -9460,14 +9358,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         phone: user.phone,
         subscriptionPlan: user.subscriptionPlan
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Update profile error:', error);
       res.status(500).json({ message: "Error updating profile" });
     }
   });
 
   // Handle payment success and create user session
-  app.get("/api/payment-success", async (req: any, res) => {
+  app.get("/api/payment-success", async (req: Request, res: Response) => {
     try {
       const { session_id, plan } = req.query;
       
@@ -9504,7 +9402,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
             
             // Store in session for phone verification completion
             req.session.pendingPayment = pendingAccount;
-            req.session.save((err: any) => {
+            req.session.save((err: : unknown) => {
               if (err) {
                 console.error('Session save error:', err);
                 return res.redirect('/subscription?error=session_failed');
@@ -9533,7 +9431,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
             req.session.userId = user.id;
             
             // Save session before redirect
-            req.session.save((err: any) => {
+            req.session.save((err: : unknown) => {
               if (err) {
                 console.error('Session save error:', err);
                 return res.redirect('/subscription?error=session_failed');
@@ -9548,38 +9446,38 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       
       console.log('Payment validation failed - redirecting to subscription with error');
       res.redirect('/subscription?error=payment_failed');
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Payment success handling error:', error);
       res.redirect('/subscription?error=processing_failed');
     }
   });
 
   // Facebook OAuth - Simplified for core publishing functionality
-  app.get("/api/auth/facebook", requireAuth, (req, res) => {
+  app.get("/api/auth/facebook", requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
   // Facebook callback handled by passport
-  app.get("/api/auth/facebook/callback", (req, res) => {
+  app.get("/api/auth/facebook/callback", (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
 
 
   // Instagram OAuth - Simplified for core publishing functionality
-  app.get("/api/auth/instagram", requireAuth, (req, res) => {
+  app.get("/api/auth/instagram", requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
   // Instagram callback handled by passport
-  app.get("/api/auth/instagram/callback", (req, res) => {
+  app.get("/api/auth/instagram/callback", (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
 
 
   // Generic data deletion endpoint for all platforms
-  app.post("/api/data-deletion", express.json(), async (req, res) => {
+  app.post("/api/data-deletion", express.json(), async (req: Request, res: Response) => {
     try {
       const { platform, user_id, signed_request } = req.body;
       
@@ -9609,7 +9507,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Admin endpoint for dynamic subscriber testing
-  app.get("/api/admin/subscribers", requireAuth, async (req: any, res) => {
+  app.get("/api/admin/subscribers", requireAuth, async (req: Request, res: Response) => {
     try {
       const requesterId = req.session.userId;
       
@@ -9654,7 +9552,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Data deletion status page
-  app.get("/data-deletion-status", (req, res) => {
+  app.get("/data-deletion-status", (req: Request, res: Response) => {
     const { code } = req.query;
     res.send(`
       <!DOCTYPE html>
@@ -9693,35 +9591,35 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
   // Instagram OAuth callback - handled by universal callback in server/index.ts
   // This route is kept for direct API calls but actual OAuth is handled by /callback
-  app.get("/api/auth/instagram/callback", async (req, res) => {
+  app.get("/api/auth/instagram/callback", async (req: Request, res: Response) => {
     console.log('Instagram OAuth callback - redirecting to connect-platforms');
     res.redirect('/connect-platforms?connected=instagram');
   });
 
   // LinkedIn OAuth - Simplified for core publishing functionality
-  app.get("/api/auth/linkedin", requireAuth, (req, res) => {
+  app.get("/api/auth/linkedin", requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
   // LinkedIn callback handled by passport
-  app.get("/api/auth/linkedin/callback", (req, res) => {
+  app.get("/api/auth/linkedin/callback", (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
   // LinkedIn refresh function removed - using direct connections
 
   // X OAuth - Simplified for core publishing functionality
-  app.get("/api/auth/x", requireAuth, (req, res) => {
+  app.get("/api/auth/x", requireAuth, (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
   // X callback handled by passport
-  app.get("/api/auth/x/callback", (req, res) => {
+  app.get("/api/auth/x/callback", (req: Request, res: Response) => {
     res.redirect('/connect-platforms?message=oauth_temporarily_disabled');
   });
 
   // X OAuth 2.0 Callback - Manual implementation
-  app.get("/api/auth/x/callback", async (req, res) => {
+  app.get("/api/auth/x/callback", async (req: Request, res: Response) => {
     try {
       const { code, state, error } = req.query;
       
@@ -9849,7 +9747,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Direct token generation endpoint - bypasses callback URL requirements
-  app.post("/api/generate-tokens", requireAuth, async (req: any, res) => {
+  app.post("/api/generate-tokens", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       
@@ -9876,7 +9774,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Simple platform connection with username/password
-  app.post("/api/connect-platform", requireAuth, async (req: any, res) => {
+  app.post("/api/connect-platform", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform, username, password } = req.body;
       
@@ -9918,14 +9816,14 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         username: username
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Platform connection error:', error);
       res.status(500).json({ message: "Error connecting platform: " + error.message });
     }
   });
 
   // OAuth token refresh endpoint
-  app.post("/api/oauth/refresh/:platform", requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/oauth/refresh/:platform", requireActiveSubscription, async (req: Request, res: Response) => {
     try {
       const { platform } = req.params;
       const userId = req.session.userId;
@@ -9967,21 +9865,21 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         message: validation.isValid ? 'Token is valid' : 'Token requires refresh - please reconnect via OAuth'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('OAuth refresh error:', error);
       res.status(500).json({ error: 'Failed to refresh OAuth token' });
     }
   });
 
   // Get connected platforms for current user (backup endpoint)
-  app.get("/api/platform-connections-backup", async (req: any, res) => {
+  app.get("/api/platform-connections-backup", async (req: Request, res: Response) => {
     try {
       if (!req.session?.userId) {
         return res.json([]); // Return empty array if not authenticated
       }
       const connections = await storage.getPlatformConnectionsByUser(req.session.userId);
       res.json(connections);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Get platform connections error:', error);
       res.status(500).json({ message: "Error fetching platform connections: " + error.message });
     }
@@ -9991,7 +9889,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   const verificationCodes = new Map<string, { code: string; expiresAt: Date }>();
 
   // Send SMS verification code endpoint
-  app.post('/api/send-code', async (req, res) => {
+  app.post('/api/send-code', async (req: Request, res: Response) => {
     try {
       const { phone } = req.body;
       
@@ -10022,7 +9920,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
           success: true, 
           message: "Verification code sent to your phone"
         });
-      } catch (smsError: any) {
+      } catch (smsError: : unknown) {
         console.log(`SMS sending failed for ${phone}:`, smsError.message);
         
         // In development, still return success for testing
@@ -10040,7 +9938,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Phone update endpoint with two-step verification
-  app.post('/api/update-phone', async (req, res) => {
+  app.post('/api/update-phone', async (req: Request, res: Response) => {
     // Force JSON response to prevent HTML injection
     res.set('Content-Type', 'application/json');
     
@@ -10117,7 +10015,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         message: 'Phone number updated successfully'
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Phone update error:', error.stack);
       res.status(500).json({ 
         error: 'Failed to update phone number',
@@ -10127,7 +10025,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Credential security check endpoint
-  app.get('/api/check-credentials', (req, res) => {
+  app.get('/api/check-credentials', (req: Request, res: Response) => {
     res.set('Content-Type', 'application/json');
     
     const adminToken = process.env.ADMIN_TOKEN || 'admin_cleanup_token_2025';
@@ -10147,7 +10045,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Database cleanup endpoint for removing excess posts and optimizing performance
-  app.post('/api/cleanup-db', async (req, res) => {
+  app.post('/api/cleanup-db', async (req: Request, res: Response) => {
     res.set('Content-Type', 'application/json');
     
     // Admin authorization check
@@ -10235,7 +10133,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   });
 
   // Token testing endpoints for launch preparation
-  app.post("/api/test-x-token", requireAuth, async (req: any, res) => {
+  app.post("/api/test-x-token", requireAuth, async (req: Request, res: Response) => {
     try {
       const { DirectPublisher } = await import('./direct-publisher');
       const result = await DirectPublisher.publishToTwitter('Test from TheAgencyIQ - X token working! DELETE THIS POST');
@@ -10245,12 +10143,12 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       } else {
         res.json({ success: false, error: result.error });
       }
-    } catch (error: any) {
+    } catch (error: : unknown) {
       res.json({ success: false, error: error.message });
     }
   });
 
-  app.post("/api/test-facebook-token", requireAuth, async (req: any, res) => {
+  app.post("/api/test-facebook-token", requireAuth, async (req: Request, res: Response) => {
     try {
       const { DirectPublisher } = await import('./direct-publisher');
       const result = await DirectPublisher.publishToFacebook('Test from TheAgencyIQ - Facebook token working! DELETE THIS POST');
@@ -10260,12 +10158,12 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       } else {
         res.json({ success: false, error: result.error });
       }
-    } catch (error: any) {
+    } catch (error: : unknown) {
       res.json({ success: false, error: error.message });
     }
   });
 
-  app.post("/api/launch-readiness", requireAuth, async (req: any, res) => {
+  app.post("/api/launch-readiness", requireAuth, async (req: Request, res: Response) => {
     try {
       const { DirectPublisher } = await import('./direct-publisher');
       
@@ -10304,13 +10202,13 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         launchReady: allOperational,
         timestamp: new Date().toISOString()
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       res.json({ success: false, error: error.message });
     }
   });
 
   // X OAuth 2.0 callback endpoint
-  app.get("/api/x/callback", async (req, res) => {
+  app.get("/api/x/callback", async (req: Request, res: Response) => {
     try {
       const { code, state, error } = req.query;
       
@@ -10329,13 +10227,13 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
         state: state,
         message: 'Authorization successful! Use this code with the token exchange function.'
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       res.status(500).json({ error: 'Callback processing failed', details: error.message });
     }
   });
 
   // Direct publishing endpoint - with automatic token refresh
-  app.post("/api/direct-publish", requireAuth, async (req: any, res) => {
+  app.post("/api/direct-publish", requireAuth, async (req: Request, res: Response) => {
     try {
       const { action, userId: targetUserId, content, platforms } = req.body;
       const userId = targetUserId || req.session.userId;
@@ -10604,7 +10502,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
 
               console.log(`❌ Failed to publish post ${post.id} to ${post.platform}: ${result.error}`);
             }
-          } catch (error: any) {
+          } catch (error: : unknown) {
             console.error(`Error publishing post ${post.id} to ${post.platform}:`, error);
             
             // Update post with error
@@ -10635,7 +10533,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
       }
 
       res.status(400).json({ message: 'Invalid action' });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Direct publish error:', error);
       res.status(500).json({ message: 'Direct publish failed' });
     }
@@ -10644,7 +10542,7 @@ Connect your business accounts (Google My Business, Facebook, LinkedIn) to autom
   // POSTING QUEUE ENDPOINTS - Prevent burst posting and handle API rate limits
   
   // Queue posts for delayed publishing to prevent account bans
-  app.post("/api/publish-queue", requireAuth, async (req: any, res) => {
+  app.post("/api/publish-queue", requireAuth, async (req: Request, res: Response) => {
     try {
       const { action } = req.body;
       const userId = req.session?.userId;
@@ -10716,40 +10614,40 @@ if (!global.queueProcessor) {
       }
 
       res.status(400).json({ error: 'Invalid action. Use queue_all_approved' });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Queue publish error:', error);
       res.status(500).json({ error: 'Failed to queue posts', details: error.message });
     }
   });
 
   // Admin queue monitoring endpoints
-  app.get("/api/admin/queue-status", requireAuth, async (req: any, res) => {
+  app.get("/api/admin/queue-status", requireAuth, async (req: Request, res: Response) => {
     try {
       const queueStatus = postingQueue.getQueueStatus();
       res.json({
         success: true,
         queue: queueStatus
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Queue status error:', error);
       res.status(500).json({ error: 'Failed to get queue status' });
     }
   });
 
-  app.get("/api/admin/queue-details", requireAuth, async (req: any, res) => {
+  app.get("/api/admin/queue-details", requireAuth, async (req: Request, res: Response) => {
     try {
       const queueDetails = postingQueue.getQueueDetails();
       res.json({
         success: true,
         queue: queueDetails
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Queue details error:', error);
       res.status(500).json({ error: 'Failed to get queue details' });
     }
   });
 
-  app.post("/api/admin/queue-clear-failed", requireAuth, async (req: any, res) => {
+  app.post("/api/admin/queue-clear-failed", requireAuth, async (req: Request, res: Response) => {
     try {
       const clearedCount = postingQueue.clearFailedPosts();
       res.json({
@@ -10757,13 +10655,13 @@ if (!global.queueProcessor) {
         message: `Cleared ${clearedCount} failed posts from queue`,
         clearedCount
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Clear failed posts error:', error);
       res.status(500).json({ error: 'Failed to clear failed posts' });
     }
   });
 
-  app.post("/api/admin/queue-emergency-stop", requireAuth, async (req: any, res) => {
+  app.post("/api/admin/queue-emergency-stop", requireAuth, async (req: Request, res: Response) => {
     try {
       const clearedCount = postingQueue.emergencyStop();
       res.json({
@@ -10771,7 +10669,7 @@ if (!global.queueProcessor) {
         message: `Emergency stop: Cleared ${clearedCount} pending posts`,
         clearedCount
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Emergency stop error:', error);
       res.status(500).json({ error: 'Failed to emergency stop queue' });
     }
@@ -10780,7 +10678,7 @@ if (!global.queueProcessor) {
   // CUSTOMER ONBOARDING OAUTH ENDPOINTS - Bulletproof secure onboarding with token management
   
   // Initiate OAuth flow for customer onboarding
-  app.get("/api/onboard/oauth/:provider", requireAuth, async (req: any, res) => {
+  app.get("/api/onboard/oauth/:provider", requireAuth, async (req: Request, res: Response) => {
     try {
       const { provider } = req.params;
       const userId = req.session?.userId;
@@ -10807,14 +10705,14 @@ if (!global.queueProcessor) {
         message: `Redirecting to ${provider} for secure business data extraction`
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('OAuth initiation error:', error);
       res.status(500).json({ error: 'Failed to initiate OAuth flow', details: error.message });
     }
   });
 
   // OAuth callback endpoint for customer onboarding
-  app.get("/api/auth/callback/:provider", async (req, res) => {
+  app.get("/api/auth/callback/:provider", async (req: Request, res: Response) => {
     try {
       const { provider } = req.params;
       const { code, state, error } = req.query as any;
@@ -10879,14 +10777,14 @@ if (!global.queueProcessor) {
 
       res.redirect(`/onboarding?${successParams.toString()}`);
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error(`❌ OAuth callback error for ${provider}:`, error);
       res.redirect(`/onboarding?error=${encodeURIComponent('callback_processing_failed')}`);
     }
   });
 
   // Refresh OAuth tokens to prevent session expiry
-  app.post("/api/onboard/refresh-tokens", requireAuth, async (req: any, res) => {
+  app.post("/api/onboard/refresh-tokens", requireAuth, async (req: Request, res: Response) => {
     try {
       const { provider } = req.body;
       const userId = req.session?.userId;
@@ -10912,14 +10810,14 @@ if (!global.queueProcessor) {
         expiresAt: refreshResult.tokens?.expiresAt
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Token refresh error:', error);
       res.status(500).json({ error: 'Failed to refresh tokens', details: error.message });
     }
   });
 
   // Validate customer onboarding data
-  app.post("/api/onboard/validate", requireAuth, async (req: any, res) => {
+  app.post("/api/onboard/validate", requireAuth, async (req: Request, res: Response) => {
     try {
       const customerData = req.body;
       
@@ -10941,7 +10839,7 @@ if (!global.queueProcessor) {
         validatedFields: Object.keys(customerData).length
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Customer data validation error:', error);
       res.status(500).json({ error: 'Validation failed', details: error.message });
     }
@@ -10950,7 +10848,7 @@ if (!global.queueProcessor) {
   // BULLETPROOF PIPELINE ORCHESTRATION ENDPOINTS - Prevents data loss and session failures
   
   // Initialize pipeline with session caching
-  app.post("/api/pipeline/initialize", requireAuth, async (req: any, res) => {
+  app.post("/api/pipeline/initialize", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId?.toString();
       const sessionId = req.sessionID;
@@ -10971,14 +10869,14 @@ if (!global.queueProcessor) {
         message: "Pipeline initialized with session caching"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Pipeline initialization error:', error);
       res.status(500).json({ error: 'Failed to initialize pipeline', details: error.message });
     }
   });
 
   // Process onboarding with comprehensive validation
-  app.post("/api/pipeline/onboarding", requireAuth, async (req: any, res) => {
+  app.post("/api/pipeline/onboarding", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId?.toString();
       const sessionId = req.sessionID;
@@ -11007,14 +10905,14 @@ if (!global.queueProcessor) {
         message: "Onboarding data validated and cached successfully"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Onboarding processing error:', error);
       res.status(500).json({ error: 'Failed to process onboarding', details: error.message });
     }
   });
 
   // Complete pipeline with post creation
-  app.post("/api/pipeline/complete", requireAuth, async (req: any, res) => {
+  app.post("/api/pipeline/complete", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId?.toString();
       const sessionId = req.sessionID;
@@ -11043,14 +10941,14 @@ if (!global.queueProcessor) {
         message: "Pipeline completed successfully"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Pipeline completion error:', error);
       res.status(500).json({ error: 'Failed to complete pipeline', details: error.message });
     }
   });
 
   // Get pipeline recovery recommendations
-  app.get("/api/pipeline/recovery/:sessionId?", requireAuth, async (req: any, res) => {
+  app.get("/api/pipeline/recovery/:sessionId?", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId?.toString();
       const sessionId = req.params.sessionId || req.sessionID;
@@ -11072,7 +10970,7 @@ if (!global.queueProcessor) {
         message: recovery.canRecover ? "Recovery options available" : "Pipeline restart required"
       });
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Recovery recommendations error:', error);
       res.status(500).json({ error: 'Failed to get recovery recommendations' });
     }
@@ -11087,34 +10985,34 @@ if (!global.queueProcessor) {
   // Instagram OAuth disabled - using direct connection method instead
 
   // OAuth routes simplified for core publishing functionality
-  app.get('/auth/linkedin', requireAuth, (req, res) => {
+  app.get('/auth/linkedin', requireAuth, (req: Request, res: Response) => {
     res.redirect('/platform-connections?message=oauth_temporarily_disabled');
   });
   
-  app.get('/auth/linkedin/callback', (req, res) => {
+  app.get('/auth/linkedin/callback', (req: Request, res: Response) => {
     res.redirect('/platform-connections?message=oauth_temporarily_disabled');
   });
 
   // X (Twitter) OAuth
-  app.get('/auth/twitter', requireAuth, (req, res) => {
+  app.get('/auth/twitter', requireAuth, (req: Request, res: Response) => {
     res.redirect('/platform-connections?message=oauth_temporarily_disabled');
   });
   
-  app.get('/auth/twitter/callback', (req, res) => {
+  app.get('/auth/twitter/callback', (req: Request, res: Response) => {
     res.redirect('/platform-connections?message=oauth_temporarily_disabled');
   });
 
   // YouTube OAuth
-  app.get('/auth/youtube', requireAuth, (req, res) => {
+  app.get('/auth/youtube', requireAuth, (req: Request, res: Response) => {
     res.redirect('/platform-connections?message=oauth_temporarily_disabled');
   });
   
-  app.get('/auth/youtube/callback', (req, res) => {
+  app.get('/auth/youtube/callback', (req: Request, res: Response) => {
     res.send('<script>window.opener.postMessage("oauth_success", "*"); window.close();</script>');
   });
 
   // Real platform connection endpoint - ENHANCED with direct connection creation
-  app.post("/api/platform-connections/connect", requireAuth, async (req: any, res) => {
+  app.post("/api/platform-connections/connect", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform, username } = req.body;
       const userId = req.session.userId;
@@ -11180,7 +11078,7 @@ if (!global.queueProcessor) {
         }
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Platform connection error:', error);
       res.status(500).json({ error: 'Connection failed' });
     }
@@ -11189,7 +11087,7 @@ if (!global.queueProcessor) {
   // REMOVED: /api/check-live-status - Unified into /api/platform-connections endpoint above
 
   // OAuth token refresh endpoint
-  app.post("/api/oauth/refresh/:platform", requireAuth, async (req: any, res) => {
+  app.post("/api/oauth/refresh/:platform", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.params;
       const userId = req.session.userId;
@@ -11215,7 +11113,7 @@ if (!global.queueProcessor) {
         });
       }
 
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error(`OAuth refresh error for ${req.params.platform}:`, error);
       res.status(500).json({ 
         success: false, 
@@ -11226,7 +11124,7 @@ if (!global.queueProcessor) {
   });
 
   // Get real platform analytics
-  app.get("/api/platform-analytics/:platform", requireAuth, async (req: any, res) => {
+  app.get("/api/platform-analytics/:platform", requireAuth, async (req: Request, res: Response) => {
     try {
       const { platform } = req.params;
       const connections = await storage.getPlatformConnectionsByUser(req.session.userId);
@@ -11260,7 +11158,7 @@ if (!global.queueProcessor) {
       }
 
       res.json(analyticsData);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Platform analytics error:', error);
       res.status(500).json({ message: "Error fetching platform analytics" });
     }
@@ -11304,7 +11202,7 @@ if (!global.queueProcessor) {
       
       console.log(`📝 Feedback submitted: ${feedbackType} from user ${userId}`);
       res.json(result);
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Feedback submission error:', error);
       res.status(500).json({ 
         success: false, 
@@ -11322,7 +11220,7 @@ if (!global.queueProcessor) {
         success: true,
         analytics
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Feedback analytics error:', error);
       res.status(500).json({ 
         success: false, 
@@ -11350,7 +11248,7 @@ if (!global.queueProcessor) {
         success: true,
         ...result
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ User feedback fetch error:', error);
       res.status(500).json({ 
         success: false, 
@@ -11360,7 +11258,7 @@ if (!global.queueProcessor) {
   });
 
   // AI CONTENT OPTIMIZATION ENDPOINTS - World-class content generation
-  app.post('/api/ai/optimize-content', requireAuth, async (req: any, res) => {
+  app.post('/api/ai/optimize-content', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const { contentType, platform } = req.body;
@@ -11380,14 +11278,14 @@ if (!global.queueProcessor) {
         message: 'Content optimized for maximum engagement'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('AI content optimization error:', error);
       res.status(500).json({ error: 'Content optimization failed', details: error.message });
     }
   });
 
   // AI LEARNING & OPTIMIZATION ENDPOINT - 30-day improvement cycles
-  app.get('/api/ai/learning-insights/:userId', requireAuth, async (req: any, res) => {
+  app.get('/api/ai/learning-insights/:userId', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.userId);
       
@@ -11399,14 +11297,14 @@ if (!global.queueProcessor) {
         message: 'Learning algorithm analysis complete'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('AI learning insights error:', error);
       res.status(500).json({ error: 'Learning analysis failed', details: error.message });
     }
   });
 
   // SEO HASHTAG GENERATION ENDPOINT - Keywords & meta tags optimization
-  app.post('/api/ai/generate-seo', requireAuth, async (req: any, res) => {
+  app.post('/api/ai/generate-seo', requireAuth, async (req: Request, res: Response) => {
     try {
       const { content, industry, location } = req.body;
       
@@ -11422,14 +11320,14 @@ if (!global.queueProcessor) {
         message: 'SEO optimization complete'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('SEO generation error:', error);
       res.status(500).json({ error: 'SEO generation failed', details: error.message });
     }
   });
 
   // OPTIMAL TIMING ANALYSIS ENDPOINT - AI-powered scheduling
-  app.get('/api/ai/optimal-timing/:platform', requireAuth, async (req: any, res) => {
+  app.get('/api/ai/optimal-timing/:platform', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const platform = req.params.platform;
@@ -11442,14 +11340,14 @@ if (!global.queueProcessor) {
         message: 'Optimal timing calculated'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Optimal timing calculation error:', error);
       res.status(500).json({ error: 'Timing calculation failed', details: error.message });
     }
   });
 
   // BUSINESS ANALYTICS ENDPOINT - Growth insights & performance tracking
-  app.get('/api/analytics/growth-insights', requireAuth, async (req: any, res) => {
+  app.get('/api/analytics/growth-insights', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       const period = parseInt(req.query.period as string) || 30;
@@ -11462,14 +11360,14 @@ if (!global.queueProcessor) {
         message: 'Business growth insights generated'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Growth insights error:', error);
       res.status(500).json({ error: 'Growth insights failed', details: error.message });
     }
   });
 
   // POST PERFORMANCE TRACKING ENDPOINT - Real-time analytics
-  app.get('/api/analytics/post-performance/:postId', requireAuth, async (req: any, res) => {
+  app.get('/api/analytics/post-performance/:postId', requireAuth, async (req: Request, res: Response) => {
     try {
       const postId = parseInt(req.params.postId);
       
@@ -11481,14 +11379,14 @@ if (!global.queueProcessor) {
         message: 'Post performance tracked'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Post performance tracking error:', error);
       res.status(500).json({ error: 'Performance tracking failed', details: error.message });
     }
   });
 
   // AUDIENCE INSIGHTS ENDPOINT - Advanced targeting optimization
-  app.get('/api/analytics/audience-insights', requireAuth, async (req: any, res) => {
+  app.get('/api/analytics/audience-insights', requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       
@@ -11500,14 +11398,14 @@ if (!global.queueProcessor) {
         message: 'Audience insights generated'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Audience insights error:', error);
       res.status(500).json({ error: 'Audience insights failed', details: error.message });
     }
   });
 
   // COMPETITOR ANALYSIS ENDPOINT - Industry benchmarking
-  app.post('/api/analytics/competitor-analysis', requireAuth, async (req: any, res) => {
+  app.post('/api/analytics/competitor-analysis', requireAuth, async (req: Request, res: Response) => {
     try {
       const { industry, location } = req.body;
       
@@ -11522,14 +11420,14 @@ if (!global.queueProcessor) {
         message: 'Competitor analysis complete'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('Competitor analysis error:', error);
       res.status(500).json({ error: 'Competitor analysis failed', details: error.message });
     }
   });
 
   // Direct publish endpoint with comprehensive quota management
-  app.post('/api/direct-publish', async (req: any, res) => {
+  app.post('/api/direct-publish', async (req: Request, res: Response) => {
     try {
       const userId = req.session?.userId;
       if (!userId) {
@@ -11600,7 +11498,7 @@ if (!global.queueProcessor) {
   // ADMIN QUOTA MONITORING ENDPOINTS
   
   // Admin endpoint for quota usage statistics
-  app.get("/api/admin/quota-stats", async (req, res) => {
+  app.get("/api/admin/quota-stats", async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
       if (!userId || userId !== 2) { // Admin only (User ID 2)
@@ -11614,7 +11512,7 @@ if (!global.queueProcessor) {
         stats,
         message: "Quota statistics retrieved successfully"
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Admin quota stats error:', error);
       res.status(500).json({ 
         success: false, 
@@ -11624,7 +11522,7 @@ if (!global.queueProcessor) {
   });
 
   // Admin endpoint for individual user quota status
-  app.get("/api/admin/user-quota/:userId", async (req, res) => {
+  app.get("/api/admin/user-quota/:userId", async (req: Request, res: Response) => {
     try {
       const adminUserId = req.session.userId;
       if (!adminUserId || adminUserId !== 2) { // Admin only
@@ -11662,7 +11560,7 @@ if (!global.queueProcessor) {
         quota,
         message: `Quota information for user ${targetUserId}`
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Admin user quota error:', error);
       res.status(500).json({ 
         success: false, 
@@ -11672,7 +11570,7 @@ if (!global.queueProcessor) {
   });
 
   // Admin endpoint for emergency quota reset
-  app.post("/api/admin/reset-quota/:userId", async (req, res) => {
+  app.post("/api/admin/reset-quota/:userId", async (req: Request, res: Response) => {
     try {
       const adminUserId = req.session.userId;
       if (!adminUserId || adminUserId !== 2) { // Admin only
@@ -11698,7 +11596,7 @@ if (!global.queueProcessor) {
           message: `Failed to reset quota for user ${targetUserId}`
         });
       }
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Admin quota reset error:', error);
       res.status(500).json({ 
         success: false, 
@@ -11708,7 +11606,7 @@ if (!global.queueProcessor) {
   });
 
   // Admin endpoint for quota cleanup maintenance
-  app.post("/api/admin/cleanup-quotas", async (req, res) => {
+  app.post("/api/admin/cleanup-quotas", async (req: Request, res: Response) => {
     try {
       const adminUserId = req.session.userId;
       if (!adminUserId || adminUserId !== 2) { // Admin only
@@ -11726,7 +11624,7 @@ if (!global.queueProcessor) {
         cleanedCount,
         message: `Cleaned up ${cleanedCount} quota records older than ${cleanupDays} days`
       });
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Admin quota cleanup error:', error);
       res.status(500).json({ 
         success: false, 
@@ -11748,10 +11646,10 @@ async function fetchFacebookAnalytics(accessToken: string) {
     let totalReach = 0;
     let totalEngagement = 0;
 
-    posts.forEach((post: any) => {
+    posts.forEach((post: : unknown) => {
       if (post.insights?.data) {
-        const impressions = post.insights.data.find((m: any) => m.name === 'post_impressions')?.values[0]?.value || 0;
-        const engagement = post.insights.data.find((m: any) => m.name === 'post_engaged_users')?.values[0]?.value || 0;
+        const impressions = post.insights.data.find((m: : unknown) => m.name === 'post_impressions')?.values[0]?.value || 0;
+        const engagement = post.insights.data.find((m: : unknown) => m.name === 'post_engaged_users')?.values[0]?.value || 0;
         totalReach += impressions;
         totalEngagement += engagement;
       }
@@ -11780,10 +11678,10 @@ async function fetchInstagramAnalytics(accessToken: string) {
     let totalReach = 0;
     let totalEngagement = 0;
 
-    posts.forEach((post: any) => {
+    posts.forEach((post: : unknown) => {
       if (post.insights?.data) {
-        const impressions = post.insights.data.find((m: any) => m.name === 'impressions')?.values[0]?.value || 0;
-        const engagement = post.insights.data.find((m: any) => m.name === 'engagement')?.values[0]?.value || 0;
+        const impressions = post.insights.data.find((m: : unknown) => m.name === 'impressions')?.values[0]?.value || 0;
+        const engagement = post.insights.data.find((m: : unknown) => m.name === 'engagement')?.values[0]?.value || 0;
         totalReach += impressions;
         totalEngagement += engagement;
       }
@@ -11851,7 +11749,7 @@ async function fetchTwitterAnalytics(accessToken: string, refreshToken: string) 
     let totalReach = 0;
     let totalEngagement = 0;
 
-    tweets.forEach((tweet: any) => {
+    tweets.forEach((tweet: : unknown) => {
       if (tweet.public_metrics) {
         totalReach += tweet.public_metrics.impression_count || 0;
         totalEngagement += (tweet.public_metrics.like_count || 0) + 
@@ -11939,7 +11837,7 @@ async function fetchYouTubeAnalytics(accessToken: string) {
   // NOTIFICATION ENDPOINTS
 
   // Notify expired posts endpoint for failed posts
-  app.post('/api/notify-expired', async (req: any, res: any) => {
+  app.post('/api/notify-expired', async (req: : unknown, res: : unknown) => {
     try {
       const { userId, postIds, message } = req.body;
       
@@ -11978,7 +11876,7 @@ async function fetchYouTubeAnalytics(accessToken: string) {
   // DATA CLEANUP AND QUOTA MANAGEMENT ENDPOINTS
   
   // Perform comprehensive data cleanup
-  app.post('/api/data-cleanup', requireAuth, async (req: any, res) => {
+  app.post('/api/data-cleanup', requireAuth, async (req: Request, res: Response) => {
     try {
       const { DataCleanupService } = await import('./data-cleanup-service');
       const userId = req.body.userId || req.session?.userId;
@@ -11999,7 +11897,7 @@ async function fetchYouTubeAnalytics(accessToken: string) {
   });
 
   // Get quota dashboard
-  app.get('/api/quota-dashboard', requireAuth, async (req: any, res) => {
+  app.get('/api/quota-dashboard', requireAuth, async (req: Request, res: Response) => {
     try {
       const { DataCleanupService } = await import('./data-cleanup-service');
       const dashboard = await DataCleanupService.getQuotaDashboard();
@@ -12014,7 +11912,7 @@ async function fetchYouTubeAnalytics(accessToken: string) {
   });
 
   // Detect quota anomalies
-  app.get('/api/quota-anomalies', requireAuth, async (req: any, res) => {
+  app.get('/api/quota-anomalies', requireAuth, async (req: Request, res: Response) => {
     try {
       const { DataCleanupService } = await import('./data-cleanup-service');
       const anomalies = await DataCleanupService.detectQuotaAnomalies();
@@ -12044,7 +11942,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
 
   // VIDEO GENERATION API ENDPOINTS - WORKING VERSION
   // Generate video prompts for post content
-  app.post('/api/video/generate-prompts', requireProSubscription, async (req: any, res) => {
+  app.post('/api/video/generate-prompts', requireProSubscription, async (req: Request, res: Response) => {
     try {
       console.log('=== VIDEO PROMPT GENERATION STARTED ===');
       console.log(`🔍 Direct session check - Session ID: ${req.sessionID}, User ID: ${req.session?.userId}`);
@@ -12057,7 +11955,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
         
         // Save session immediately
         await new Promise((resolve, reject) => {
-          req.session.save((err: any) => {
+          req.session.save((err: : unknown) => {
             if (err) reject(err);
             else resolve(true);
           });
@@ -12149,7 +12047,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // PROXY video content for CORS compatibility
-  app.post('/api/video/proxy', async (req, res) => {
+  app.post('/api/video/proxy', async (req: Request, res: Response) => {
     try {
       const { videoUrl } = req.body;
       
@@ -12180,7 +12078,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // ENHANCED VIDEO RENDER ENDPOINT - VEO 3.0 WITH COST PROTECTION AND SESSION VALIDATION
-  app.post("/api/video/render", requireProSubscription, async (req: any, res) => {
+  app.post("/api/video/render", requireProSubscription, async (req: Request, res: Response) => {
     try {
       await checkVideoQuota(req, res, next); // From ~Ln 40
       // Import session utilities for secure handling
@@ -12472,7 +12370,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
         });
       }
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ VEO 3.0 video generation failed:', error);
       res.status(500).json({
         success: false,
@@ -12487,7 +12385,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   const { veoProtection } = await import('./middleware/veoProtection.js');
 
   // VEO 3.0 OPERATION STATUS ENDPOINT - For checking async generation progress
-  app.get('/api/video/operation/:operationId', veoPollingRateLimit, requireAuth, async (req: any, res) => {
+  app.get('/api/video/operation/:operationId', veoPollingRateLimit, requireAuth, async (req: Request, res: Response) => {
     try {
       const { operationId } = req.params;
       
@@ -12572,7 +12470,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
         }
       }
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Operation status check failed:', error);
       res.status(500).json({
         success: false,
@@ -12585,7 +12483,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   // MEMORY-OPTIMIZED VIDEO SERVING ENDPOINTS
   
   // Lazy video serving endpoint - uses GCS URIs and temp files
-  app.post('/api/video/serve/:videoId', requireAuth, async (req: any, res) => {
+  app.post('/api/video/serve/:videoId', requireAuth, async (req: Request, res: Response) => {
     try {
       const { videoId } = req.params;
       let { gcsUri } = req.body;
@@ -12612,7 +12510,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
         memoryOptimized: true
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Video serving failed:', error);
       res.status(500).json({
         success: false,
@@ -12622,7 +12520,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // Temp video file serving
-  app.get('/temp-video/:videoId', (req, res) => {
+  app.get('/temp-video/:videoId', (req: Request, res: Response) => {
     const { videoId } = req.params;
     const tempPath = path.join(process.cwd(), 'temp', `${videoId}.mp4`);
     
@@ -12640,7 +12538,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // Video cleanup endpoint for post-publish cleanup
-  app.post('/api/video/cleanup/:videoId', requireAuth, async (req: any, res) => {
+  app.post('/api/video/cleanup/:videoId', requireAuth, async (req: Request, res: Response) => {
     try {
       const { videoId } = req.params;
       
@@ -12657,7 +12555,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
         message: 'Video cleanup completed'
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Video cleanup failed:', error);
       res.status(500).json({
         success: false,
@@ -12667,7 +12565,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // Memory usage report endpoint
-  app.get('/api/video/memory-report', requireAuth, async (req: any, res) => {
+  app.get('/api/video/memory-report', requireAuth, async (req: Request, res: Response) => {
     try {
       // Import VeoService to get video manager
       const VeoService = (await import('./veoService')).default;
@@ -12680,7 +12578,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
         report: report
       });
       
-    } catch (error: any) {
+    } catch (error: : unknown) {
       console.error('❌ Memory report failed:', error);
       res.status(500).json({
         success: false,
@@ -12690,7 +12588,7 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // Publish approved post (with video + text) to platforms
-  app.post('/api/post/publish-approved', async (req: any, res) => {
+  app.post('/api/post/publish-approved', async (req: Request, res: Response) => {
     try {
       const { userId, postId, platforms } = req.body;
       const VideoService = (await import('./videoService.js')).default;
@@ -12723,81 +12621,57 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // VIDEO APPROVAL ENDPOINT WITH AUTO-POSTING INTEGRATION
-  app.post("/api/video/approve", requireAuth, async (req: any, res) => {
-    try {
-      const { userId, postId, videoData } = req.body;
-      const sessionUserId = req.session.userId!;
-      
-      console.log(`🎯 Video approval requested - Post ID: ${postId}, User: ${sessionUserId}`);
-      
-      // Validate user authorization
-      if (userId && userId !== sessionUserId) {
-        return res.status(403).json({
-          success: false,
-          error: 'Unauthorized access to post'
-        });
-      }
-      
-      // Get the post from database
-      const post = await storage.getPost(postId);
-      if (!post) {
-        return res.status(404).json({
-          success: false,
-          error: 'Post not found'
-        });
-      }
-      
-      // Update post with video approval
-      const updatedPost = await storage.updatePost(postId, {
-        status: 'approved',
-        videoData: videoData,
-        approvedAt: new Date().toISOString()
-      });
-      
-      console.log(`✅ Video approved successfully - Post ID: ${postId}`);
-      
-      // AUTO-PUBLISH: Add to posting queue with auto-scheduling
-      let autoPublishResult = null;
-      try {
-        const PostingQueue = (await import('./PostingQueue')).default;
-        const postingQueue = new PostingQueue();
-        
-        // Add approved video to posting queue for immediate/scheduled publishing
-        autoPublishResult = await postingQueue.addPost({
-          postId: postId,
-          userId: sessionUserId,
-          content: updatedPost.content,
-          platforms: [updatedPost.platform],
-          videoData: videoData,
-          scheduledFor: new Date(Date.now() + 2000), // Schedule 2 seconds from now
-          priority: 'high',
-          autoApproved: true
-        });
-        
-        console.log(`🚀 AUTO-PUBLISH: Added post ${postId} to publishing queue:`, autoPublishResult);
-      } catch (publishError) {
-        console.log(`⚠️ Auto-publish failed, video still approved:`, publishError.message);
-      }
-      
-      res.json({
-        success: true,
-        message: 'Video approved and queued for publishing',
-        post: updatedPost,
-        videoData: videoData,
-        autoPublish: autoPublishResult
-      });
-      
-    } catch (error: any) {
-      console.error('❌ Video approval failed:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Video approval temporarily unavailable'
-      });
+  app.post("/api/video/approve", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId, postId, videoData } = req.body;
+    const sessionUserId = req.session.userId!;
+    console.log(`🎯 Video approval requested - Post ID: ${postId}, User: ${sessionUserId}`);
+    if (userId && userId !== sessionUserId) {
+      return res.status(403).json({ success: false, error: 'Unauthorized access to post' });
     }
-  });
+    const post = await storage.getPost(postId);
+    if (!post) {
+      return res.status(404).json({ success: false, error: 'Post not found' });
+    }
+    const updatedPost = await storage.updatePost(postId, {
+      status: 'approved',
+      videoData: videoData,
+      approvedAt: new Date().toISOString()
+    });
+    console.log(`✅ Video approved successfully - Post ID: ${postId}`);
+    let autoPublishResult = null;
+    try {
+      const PostingQueue = (await import('./PostingQueue')).default;
+      const postingQueue = new PostingQueue();
+      autoPublishResult = await postingQueue.addPost({
+        postId: postId,
+        userId: sessionUserId,
+        content: updatedPost.content,
+        platforms: [updatedPost.platform],
+        videoData: videoData,
+        scheduledFor: new Date(Date.now() + 2000),
+        priority: 'high',
+        autoApproved: true
+      });
+      console.log(`🚀 AUTO-PUBLISH: Added post ${postId} to publishing queue:`, autoPublishResult);
+    } catch (publishError) {
+      console.log(`⚠️ Auto-publish failed, video still approved:`, publishError.message);
+    }
+    res.json({
+      success: true,
+      message: 'Video approved and queued for publishing',
+      post: updatedPost,
+      videoData: videoData,
+      autoPublish: autoPublishResult
+    });
+  } catch (error: any) {
+    console.error('❌ Video approval failed:', error);
+    res.status(500).json({ success: false, error: 'Video approval temporarily unavailable' });
+  }
+});
 
   // VIDEO PROXY ENDPOINT FOR SERVING GENERATED VIDEOS
-  app.get('/videos/:videoId', async (req, res) => {
+  app.get('/videos/:videoId', async (req: Request, res: Response) => {
     try {
       const { videoId } = req.params;
       console.log(`📺 Video request: ${videoId}`);
@@ -12839,44 +12713,36 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
   });
 
   // VEO 3.0 TEST ENDPOINT
-  app.post("/api/video/test-veo3", async (req: any, res) => {
-    try {
-      const { prompt } = req.body;
-      if (!prompt) {
-        return res.status(400).json({ error: 'Prompt is required' });
-      }
-
-      console.log('🧪 Testing VEO 3.0 with simple prompt:', prompt);
-      
-      // Import VideoService to test VEO 3.0 functionality
-      const VideoService = (await import('./videoService')).default;
-      
-      // Test VEO 3.0 generation with simple prompt
-      const result = await VideoService.generateVeo3VideoContent(prompt, {
-        aspectRatio: '16:9',
-        durationSeconds: 8
-      });
-      
-      console.log('🎥 VEO 3.0 test result:', result);
-      
-      return res.json({
-        success: true,
-        tested: 'VEO 3.0 integration',
-        result: result,
-        prompt: prompt,
-        timestamp: new Date().toISOString()
-      });
-      
-    } catch (error) {
-      console.error('❌ VEO 3.0 test failed:', error);
-      return res.status(500).json({ 
-        error: 'VEO 3.0 test failed', 
-        details: error.message,
-        apiKeyConfigured: !!process.env.GOOGLE_AI_STUDIO_KEY,
-        vertexKeyConfigured: !!process.env.VERTEX_AI_SERVICE_ACCOUNT_KEY
-      });
+  app.post("/api/video/test-veo3", async (req: Request, res: Response) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
     }
-  });
+    console.log('🧪 Testing VEO 3.0 with simple prompt:', prompt);
+    const VideoService = (await import('./videoService')).default;
+    const result = await VideoService.generateVeo3VideoContent(prompt, {
+      aspectRatio: '16:9',
+      durationSeconds: 8
+    });
+    console.log('🎥 VEO 3.0 test result:', result);
+    return res.json({
+      success: true,
+      tested: 'VEO 3.0 integration',
+      result: result,
+      prompt: prompt,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ VEO 3.0 test failed:', error);
+    return res.status(500).json({ 
+      error: 'VEO 3.0 test failed', 
+      details: error.message,
+      apiKeyConfigured: !!process.env.GOOGLE_AI_STUDIO_KEY,
+      vertexKeyConfigured: !!process.env.VERTEX_AI_SERVICE_ACCOUNT_KEY
+    });
+  }
+});
 
   // PRODUCTION OAUTH CONFIGURATION FOR app.theagencyiq.ai
   // Import and configure production OAuth routes for deployment
