@@ -41,6 +41,10 @@ import { CustomerOnboardingOAuth } from './services/CustomerOnboardingOAuth';
 import { PipelineOrchestrator } from './services/PipelineOrchestrator';
 import { EnhancedCancellationHandler } from './services/EnhancedCancellationHandler';
 import PipelineIntegrationFix from './services/PipelineIntegrationFix';
+import SessionCacheManager from './services/SessionCacheManager';
+// ... (rest of imports)
+// Then search for "const tokenManager = new TokenManager(storage);" ~Ln 140, paste after:
+const sessionCache = new SessionCacheManager(); // For caching oauthTokens
 // import SessionCacheManager from './services/SessionCacheManager'; // Commented out to fix ES module conflict
 import TokenManager from './oauth/tokenManager.js';
 // import { apiRateLimit, socialPostingRateLimit, videoGenerationRateLimit, authRateLimit, skipRateLimitForDevelopment } from './middleware/rateLimiter'; // DISABLED FOR DEPLOYMENT
@@ -54,6 +58,14 @@ app.use('/api/post', checkQuotaMiddleware, async (req, res, next) => {
   const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
   // From research below: Get max based on sub
   const maxPosts = user.stripeSubscriptionActive ? 90 : 10; // Buffer below limit
+  const quotaLimits = user.stripeSubscriptionActive ? { twitter: 90, instagram: 90, facebook: 450, linkedin: 450, youtube: 9000 } : { twitter: 10, instagram: 10, facebook: 50, linkedin: 50, youtube: 1000 }; // Buffered max from research (e.g., Twitter 100/day Ayrshare, Instagram 100/24h Meta)
+const published = { twitter: user.published_twitter || 0, instagram: user.published_instagram || 0 /* add DB columns like published_twitter int default 0 if missing ~Ln 5 */ };
+// Reset if new day (maximize daily for subs)
+
+if (new Date().getDate() !== new Date(user.last_reset || '1970-01-01').getDate()) {
+  await db.update(users).set({ published_twitter: 0, published_instagram: 0 /* add others */, last_reset: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, user.id));
+}
+if (published[platform.toLowerCase()] >= quotaLimits[platform.toLowerCase()]) return res.status(429).json({ error: 'Quota exceeded for ' + platform + ' - Upgrade!' });
   if (user.daily_posts >= maxPosts) return res.status(429).json({ error: 'Quota exceeded - Upgrade!' });
   next();
 });
@@ -90,7 +102,33 @@ if (!process.env.TWITTER_CLIENT_ID) throw new Error('Missing TWITTER_CLIENT_ID f
 app.post('/api/post', requireAuth, async (req, res) => {
   const { content, platform } = req.body;
   // Check quota first (from above)
-  postingQueue.add({ userId: req.session.userId, content, platform });
+
+  postingQueue.// Token refresh from research (e.g., Instagram GET, LinkedIn POST)
+const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
+const tokens = user.oauthTokens[platform.toLowerCase()] || {};
+if (tokens.expires < Date.now()) {
+  let newToken;
+  if (platform.toLowerCase() === 'instagram') {
+    const resp = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${tokens.accessToken}`);
+    newToken = resp.data.access_token;
+  } else if (platform.toLowerCase() === 'linkedin') {
+    const resp = await axios.post('https://www.linkedin.com/oauth/v2/accessToken', { grant_type: 'refresh_token', refresh_token: tokens.refreshToken, client_id: process.env.LINKEDIN_CLIENT_ID, client_secret: process.env.LINKEDIN_CLIENT_SECRET });
+    newToken = resp.data.access_token;
+  } // Add ifs for others (Twitter rare, YouTube POST /token)
+  await db.update(users).set({ oauthTokens: { ...user.oauthTokens, [platform.toLowerCase()]: { ...tokens, accessToken: newToken, expires: Date.now() + 3600000 } } }).where(eq(users.id, user.id)); // 1h example
+}
+// Platform handling (e.g., multipart media from multer ~Ln 18)
+if (req.files && req.files.media) { // Assume multer middleware applied earlier
+  // Use in PostPublisher ~Ln 22 with form data
+}
+// Queue processor (run once, process every 5s)
+setInterval(async () => {
+  const job = postingQueue.getNext(); // Assume method; implement if missing
+  if (job) {
+    // Post using tokens, e.g., await PostPublisher.publish(job, user.oauthTokens[job.platform]);
+    postingQueue.remove(job);
+  }
+}, 5000);add({ userId: req.session.userId, content, platform });
   await db.update(users).set({ daily_posts: sql`${users.daily_posts} + 1` }).where(eq(users.id, req.session.userId));
   res.json({ success: true });
 });
@@ -130,8 +168,13 @@ interface CustomRequest extends Request {
 
 // SendGrid validation removed to allow server startup
 
+if (!process.env.DATABASE_URL) throw new Error('Missing DATABASE_URL for session store');
 if (!process.env.SESSION_SECRET) {
   throw new Error('Missing required SESSION_SECRET');
+  if (!process.env.INSTAGRAM_CLIENT_ID) throw new Error('Missing INSTAGRAM_CLIENT_ID—add in Vercel from Meta Dev Portal');
+  if (!process.env.FACEBOOK_CLIENT_ID) throw new Error('Missing FACEBOOK_CLIENT_ID');
+  if (!process.env.LINKEDIN_CLIENT_ID) throw new Error('Missing LINKEDIN_CLIENT_ID');
+  if (!process.env.YOUTUBE_CLIENT_ID) throw new Error('Missing YOUTUBE_CLIENT_ID');
 }
 
 // Initialize services
@@ -155,6 +198,14 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
   } catch (err) { return res.status(400).send(`Webhook Error: ${err.message}`); }
   if (event.type === 'customer.subscription.created') {
     const sub = event.data.object;
+    // Handle gift certs for promo (schema ~Ln 5)
+if (sub.metadata.giftCode) {
+  await db.insert(giftCertificates).values({ code: sub.metadata.giftCode, userId: /* from sub.customer */ });
+}
+// Add stripeCustomerId if missing (migration stub)
+if (!user.stripeCustomerId) {
+  await db.update(users).set({ stripeCustomerId: sub.customer }).where(eq(users.id, /* from DB lookup */ ));
+}
     await db.update(users).set({ subscriptionPlan: sub.items.data[0].plan.nickname.toLowerCase(), subscriptionActive: true }).where(eq(users.stripeCustomerId, sub.customer)); // Assume DB has stripeCustomerId
   } else if (event.type === 'customer.subscription.deleted') {
     await db.update(users).set({ subscriptionPlan: 'cancelled', subscriptionActive: false }).where(eq(users.stripeCustomerId, event.data.object.customer));
@@ -1891,6 +1942,14 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
         return res.status(403).json({
           success: false,
           error: 'Instagram OAuth fix only available for authorized users'
+          // Complete for other platforms
+    app.get('/auth/facebook', authenticateFacebook);
+    app.get('/auth/facebook/callback', passport.authenticate('facebook', { failureRedirect: '/' }), async (req, res) => {
+    req.session.oauthTokens = { ...req.session.oauthTokens, facebook: { accessToken: req.user.accessToken } };
+    await CustomerOnboardingOAuth.completeOnboarding(req.user.id, 'facebook'); // Call service ~Ln 41 for post-login setup (e.g., save connections)
+    res.redirect('/dashboard');
+});
+// Add for linkedin/youtube similarly using authenticateLinkedIn/authenticateYouTube ~Ln 24
         });
       }
 
@@ -2183,6 +2242,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
 
   // Get latest generated Veo3 video for preview testing
   app.get('/api/video/latest-veo3', (req, res) => {
+    checkVideoQuota(req, res, next); next();
     try {
       if (global.latestVeo3Video) {
         console.log(`📹 Serving latest Veo3 video: ${global.latestVeo3Video.url}`);
