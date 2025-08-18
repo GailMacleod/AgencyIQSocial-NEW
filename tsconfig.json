@@ -15,6 +15,7 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": false,
     "noImplicitAny": false,
+    "include": "types/**/*.d.ts",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./client/src/*"],
