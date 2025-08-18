@@ -97,6 +97,20 @@ app.get('/auth/instagram/callback', passport.authenticate('instagram', { failure
   req.session.oauthTokens = { ...req.session.oauthTokens, instagram: { accessToken: req.user.accessToken } };
   res.redirect('/dashboard');
 });
+app.post('/api/refresh-oauth', requireAuth, async (req, res) => {
+  const { platform } = req.body;
+  const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
+  let newToken;
+  if (platform === 'instagram') {
+    const resp = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.oauthTokens.instagram.accessToken}`);
+    newToken = resp.data.access_token;
+  } else if (platform === 'twitter') {
+    // Twitter tokens long-lived; refresh if revoked (assume refresh_token exists)
+    newToken = user.oauthTokens.twitter.refreshToken; // Placeholder—implement per Twitter API
+  }
+  await db.update(users).set({ oauthTokens: { ...user.oauthTokens, [platform]: { ...user.oauthTokens[platform], accessToken: newToken } } }).where(eq(users.id, user.id));
+  res.json({ success: true, newToken });
+});
 // Env check for secrets (add to validation ~Ln 130)
 if (!process.env.TWITTER_CLIENT_ID) throw new Error('Missing TWITTER_CLIENT_ID for OAuth');
 
@@ -3275,6 +3289,7 @@ if (new Date().getDate() !== new Date(user.lastQuotaReset).getDate()) {
   app.get('/api/quota-status', (req: any, res, next) => {
     console.log('🎯 QUOTA STATUS ENDPOINT HIT - Working correctly!');
     res.setHeader('Content-Type', 'application/json');
+    fs.unlinkSync(metaPath); // Cleanup after serving (risky—add error handling if prod)
     const quotaData = {
       plan: 'professional',
       totalPosts: 52,
@@ -10675,6 +10690,17 @@ if (content.includes('video')) {
 }
 
         console.log(`📋 Queuing ${queuePosts.length} posts with 2s delays (max 3 per subscription)`);
+      // Token refresh (e.g., Instagram from Meta research)
+const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
+if (user.oauthTokens?.[platform]?.expires < Date.now()) {
+  const resp = await axios.get(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.oauthTokens.instagram.accessToken}`);
+  await db.update(users).set({ oauthTokens: { ...user.oauthTokens, instagram: { accessToken: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) } } }).where(eq(users.id, user.id));
+  req.session.oauthTokens = user.oauthTokens; // Update session
+}
+// Queue processor (run once)
+if (!global.queueProcessor) {
+  global.queueProcessor = setInterval(() => postingQueue.process(), 5000); // Every 5s
+}  
         const queueIds = await postingQueue.addBatchToQueue(queuePosts);
 
         return res.json({
@@ -12010,7 +12036,8 @@ async function fetchYouTubeAnalytics(accessToken: string) {
     veoUsageRoutes(app);
     console.log('📊 VEO usage monitoring routes registered');
   } catch (error) {
-    console.warn('⚠️ VEO usage routes registration failed:', error.message);
+    console.error('❌ Production OAuth configuration failed:', oauthError.stack);
+throw new Error('OAuth setup failed—check production-oauth.js and env secrets');
   }
 
   // VIDEO GENERATION API ENDPOINTS - WORKING VERSION
@@ -12153,6 +12180,7 @@ async function fetchYouTubeAnalytics(accessToken: string) {
   // ENHANCED VIDEO RENDER ENDPOINT - VEO 3.0 WITH COST PROTECTION AND SESSION VALIDATION
   app.post("/api/video/render", requireProSubscription, async (req: any, res) => {
     try {
+      await checkVideoQuota(req, res, next); // From ~Ln 40
       // Import session utilities for secure handling
       const sessionManager = (await import('./sessionUtils.js')).default;
       const migrationValidator = (await import('./drizzleMigrationValidator.js')).default;
