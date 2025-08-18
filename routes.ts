@@ -57,17 +57,18 @@ import { VeoUsageTracker } from './services/VeoUsageTracker';
 app.use('/api/post', checkQuotaMiddleware, async (req, res, next) => {
   const user = await db.select().from(users).where(eq(users.id, req.session.userId)).first();
   // From research below: Get max based on sub
-  const maxPosts = user.stripeSubscriptionActive ? 90 : 10; // Buffer below limit
-  const quotaLimits = user.stripeSubscriptionActive ? { twitter: 90, instagram: 90, facebook: 450, linkedin: 450, youtube: 9000 } : { twitter: 10, instagram: 10, facebook: 50, linkedin: 50, youtube: 1000 }; // Buffered max from research (e.g., Twitter 100/day Ayrshare, Instagram 100/24h Meta)
-const published = { twitter: user.published_twitter || 0, instagram: user.published_instagram || 0 /* add DB columns like published_twitter int default 0 if missing ~Ln 5 */ };
-// Reset if new day (maximize daily for subs)
-
-if (new Date().getDate() !== new Date(user.last_reset || '1970-01-01').getDate()) {
-  await db.update(users).set({ published_twitter: 0, published_instagram: 0 /* add others */, last_reset: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, user.id));
-}
+const quotas = user.stripeSubscriptionActive ? { twitter: 90, instagram: 90, facebook: 450, linkedin: 450, youtube: 9000 } : { twitter: 10, instagram: 10, facebook: 50, linkedin: 50, youtube: 1000 }; // From research, buffered
+const platform = req.body.platform || 'twitter'; // Default to twitter if not specified
+const dailyPosts = user[`daily_posts_${platform}`] || 0; // Assume DB columns added
+if (dailyPosts >= quotas[platform]) return res.status(429).json({ error: `Quota exceeded for ${platform} - Upgrade!` });
 if (published[platform.toLowerCase()] >= quotaLimits[platform.toLowerCase()]) return res.status(429).json({ error: 'Quota exceeded for ' + platform + ' - Upgrade!' });
   if (user.daily_posts >= maxPosts) return res.status(429).json({ error: 'Quota exceeded - Upgrade!' });
   next();
+  await db.update(users).set({ [`daily_posts_${platform}`]: sql`${users[`daily_posts_${platform}`]} + 1` }).where(eq(users.id, req.session.userId));
+// Daily reset stub (integrate with DataCleanupService ~Ln 35 as cron)
+if (new Date().getDate() !== new Date(user.lastReset || 0).getDate()) {
+  await db.update(users).set({ ...Object.fromEntries(Object.keys(quotas).map(p => [`daily_posts_${p}`, 0])), lastReset: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, req.session.userId));
+}
 });
 
 app.use(session({
