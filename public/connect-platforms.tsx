@@ -78,18 +78,20 @@ export default function ConnectPlatforms() {
   const [connecting, setConnecting] = useState<{[key: string]: boolean}>({});
   const [reconnecting, setReconnecting] = useState<{[key: string]: boolean}>({});
 
-  // WORLD-CLASS STATE MANAGEMENT: Real-time platform sync for small business success
+    // WORLD-CLASS STATE MANAGEMENT: Real-time platform sync for small business success
   const { data: connections = [], isLoading, refetch, error } = useQuery<PlatformConnection[]>({
     queryKey: ['/api/platform-connections'],
-    retry: (failureCount, error: any) => {
+    retry: (failureCount, error: Error) => {
       if (error?.response?.status === 401 && failureCount < 2) {
         // Intelligent session recovery with user context
+        const userEmail = req.session.user?.email || 'default@email.com'; // From session (assume user in session extensions ~90)
+        const userPhone = req.session.user?.phone || '+1234567890'; // Dynamic from session
         fetch('/api/establish-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: 'gailm@macleodglba.com.au',
-            phone: '+61424835189'
+            email: userEmail,
+            phone: userPhone
           }),
           credentials: 'include'
         }).then(response => {
@@ -107,6 +109,8 @@ export default function ConnectPlatforms() {
       }
       return failureCount < 3;
     },
+  });
+  
     refetchOnWindowFocus: true,
     refetchInterval: 15000, // Optimized for real-time updates without overloading
     staleTime: 3000, // Fresh data for better UX
