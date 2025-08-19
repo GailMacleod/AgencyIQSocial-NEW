@@ -15,7 +15,6 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": false,
     "noImplicitAny": false,
-    "include": "types/**/*.d.ts",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./client/src/*"],
@@ -23,6 +22,7 @@
       "@shared/*": ["./shared/*"]
     }
   },
-  "include": ["client/src", "shared"],
+  "include": ["client/src", "shared", "types/**/*.d.ts"],
+  "exclude": ["node_modules"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
