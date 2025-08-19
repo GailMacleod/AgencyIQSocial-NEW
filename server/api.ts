@@ -8,11 +8,11 @@
 // - Fixed types with MyRequest interface to resolve session.userId nonexistent errors.
 // - Merged quota/auto-posting middleware from server.ts (enhanced with researched platform limits: FB=35/day, IG=50/day, LI=50/day, X=100/day, YT=6/day to max posts without bans).
 // - Completed onboarding with email uniqueness, bcrypt hash, Twilio verify, session set, and Stripe checkout creation for immediate subscription (money-making flow).
-// - Enhanced deactivate with auth check and platform-specific revoke (researched endpoints: FB DELETE /permissions, X POST /oauth2/revoke, etc.).
-// - Fixed generate-content: Added quota/plan checks (professional for Veo upsell), Grok/Veo calls, deduct on success, integrated auto-post if platform provided (uses postScheduler with tokens/limits).
-// - Patched Stripe webhook: Raw body for sig, fixed undefined plan.name via priceId mapping, handled create/update/delete events for quota sync.
+// - Patches for deactivate with auth check, platform-specific revoke (researched endpoints: FB DELETE /permissions, X POST /oauth2/revoke, etc.).
+// - Fixed generate-content: Added quota/plan checks (professional for Veo upsell), Grok/Veo calls, deduct on success, integrated auto-post if platform provided (uses postScheduler with limits/tokens).
+// - Patches for Stripe webhook: Raw body for sig, fixed undefined plan.name via priceId mapping, handled create/update/delete events for quota sync.
 // - Added FB data-deletion for GDPR (parse signed_request, delete data, status endpoint).
-// - Added /video/operation/:opId from server.ts with rate-limit and deduct on complete.
+// - Added /video/operation/:opId from server.ts with rate-limit and deduct on complete for revenue.
 // - Architecture Note: This router is imported in server.ts via await import('./api'); app.use('/api', apiRouter);
 // - End Objective: Seamless UE for onboarding -> sub payment -> OAuth connect -> content gen (Grok text + Veo video) -> auto-post to platforms with limits/quotas for revenue via excellent service (deduct only on success, upsell professional plan).
 // - Researched: OAuth scopes/revokes per 2025 docs (e.g., FB pages_publish, X approved app for /tweets, YT youtube.upload); posting limits to avoid bans/max subscriber value; Stripe checkout for subs.
@@ -87,7 +87,7 @@ apiRouter.use('/post', async (req: MyRequest, res: Response, next: NextFunction)
   const platform = req.body.platform;
   const tokens = await storage.getOAuthTokens(req.session.userId, platform); // Assume returns { accessToken, refreshToken, expired: boolean }
   if (tokens.expired) {
-    const refreshed = await oauthService.refreshTokens(tokens.refreshToken, platform); // Per platform (e.g., FB /oauth/access_token)
+    const refreshed = await oauthService.refreshTokens(tokens.refreshToken, platform); // Per platform (e.g., FB: POST /oauth/access_token)
     await storage.updateOAuthTokens(req.session.userId, platform, refreshed);
   }
   next();
@@ -121,8 +121,9 @@ apiRouter.post('/onboarding', async (req: MyRequest, res: Response) => {
       metadata: { userId: user.id },
     });
     res.json({ success: true, stripeSessionUrl: stripeSession.url });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Onboarding failed: ' + error.message });
+  } catch (error: unknown) {
+    const e = error as Error;
+    res.status(500).json({ error: 'Onboarding failed: ' + e.message });
   }
 });
 
@@ -133,8 +134,9 @@ apiRouter.post('/deactivate-platform', async (req: MyRequest, res: Response) => 
     const { platform } = req.body;
     await oauthService.revokeTokens(req.session.userId, platform); // e.g., FB: DELETE https://graph.facebook.com/v20.0/{user-id}/permissions?access_token={token}
     res.json({ success: true });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Deactivation failed: ' + error.message });
+  } catch (error: unknown) {
+    const e = error as Error;
+    res.status(500).json({ error: 'Deactivation failed: ' + e.message });
   }
 });
 
@@ -155,8 +157,9 @@ apiRouter.post('/generate-content', async (req: MyRequest, res: Response) => {
       await postScheduler.postToPlatform(req.session.userId, content, req.body.platform);
     }
     res.json({ content, video: { isAsync: true, operationId: veoInit.operationId, pollEndpoint: `/api/video/operation/${veoInit.operationId}`, message: 'VEO 3.0 generation initiated - use operation ID to check status', pollInterval: 5000, estimatedTime: '115s to 6 minutes', status: 'processing' } });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Content generation failed: ' + error.message });
+  } catch (error: unknown) {
+    const e = error as Error;
+    res.status(500).json({ error: 'Content generation failed: ' + e.message });
   }
 });
 
@@ -167,9 +170,9 @@ apiRouter.get('/video/operation/:opId', rateLimit({ windowMs: 5000, max: 1 }), a
     const status = await veoService.pollOperationStatus(req.params.opId, req.session.userId);
     if (status.status === 'completed') await quotaManager.deductQuota(req.session.userId, 1);
     res.json(status);
-  } catch (error: any) {
-    Create grok-service.ts (POST to https://api.x.ai/v1/chat/completions with XAI_API_KEY) and veo-service.ts (initiate POST to Vertex AI /generateContent with GOOGLE_AI_STUDIO_KEY, poll GET /operations/{id}) below, matching screenshots (return {operationId, pollEndpoint, message, pollInterval:5000, estimatedTime:'115s to 6 minutes', status:'processing'})
-    res.status(500).json({ error: 'Poll failed: ' + error.message });
+  } catch (error: unknown) {
+    const e = error as Error;
+    res.status(500).json({ error: 'Poll failed: ' + e.message });
   }
 });
 
@@ -194,8 +197,9 @@ apiRouter.post('/stripe-webhook', express.raw({ type: 'application/json' }), asy
       await quotaManager.updateQuotaFromStripe(userId, 0);
     }
     res.json({ received: true });
-  } catch (error: any) {
-    res.status(400).json({ error: 'Webhook failed: ' + error.message });
+  } catch (error: unknown) {
+    const e = error as Error;
+    res.status(400).json({ error: 'Webhook failed: ' + e.message });
   }
 });
 
@@ -209,8 +213,9 @@ apiRouter.post('/data-deletion/facebook', async (req: MyRequest, res: Response) 
     await storage.deleteUserData(fbUserId); // Assume impl: delete or anonymize user
     const deletionId = Date.now().toString();
     res.json({ url: `https://${req.headers.host}/api/deletion-status/${deletionId}`, confirmation_code: deletionId });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Deletion failed: ' + error.message });
+  } catch (error: unknown) {
+    const e = error as Error;
+    res.status(500).json({ error: 'Deletion failed: ' + e.message });
   }
 });
 
@@ -230,5 +235,18 @@ apiRouter.get('/deletion-status/:id', (req: MyRequest, res: Response) => {
   // Assume status check – simple success for now
   res.json({ status: 'Deletion complete', confirmation_code: deletionId });
 });
+
+export async function apiRequest(url: string, options: RequestInit = {}) {
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) throw new Error(`API error: ${response.status}`);
+    return response.json();
+  } catch (error: unknown) {
+    const e = error as Error;
+    console.error('API request failed:', e.message);
+    toast.error('API request failed');
+    throw error;
+  }
+}
 
 export { apiRouter };
