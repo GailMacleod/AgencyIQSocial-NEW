@@ -5,12 +5,11 @@ const MICROSERVICE_ENDPOINTS = {
     : 'http://localhost:3000'
 };
 
-export async function apiRequest(
-  method: string,
-  url: string,
-  data?: unknown,
-): Promise<any> {
-  console.log(`API call to ${url} starting with method ${method}`);
+export async function apiRequest(url: string, options: RequestInit = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`API error: ${response.status}`);
+  return response.json();
+}
   
   try {
     // Reduced timeout for API requests (10 seconds)

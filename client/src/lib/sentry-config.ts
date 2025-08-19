@@ -6,8 +6,10 @@
 // Extend Window interface for Sentry
 declare global {
   interface Window {
-    Sentry?: {
-      init: (config: any) => void;
+    export interface Sentry {
+  captureException: (error: Error) => void;
+  // Add other methods if used
+}
       captureException: (error: Error, context?: any) => string;
       captureMessage: (message: string, level?: string) => string;
       setUser: (user: any) => void;
