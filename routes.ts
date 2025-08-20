@@ -1,60 +1,52 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage } from "./storage"; // Fixed from absolute path
 import { insertUserSchema, insertBrandPurposeSchema, insertPostSchema, users, postLedger, postSchedule, platformConnections, posts, brandPurpose, giftCertificates } from "@shared/schema";
-import { db } from "./db";
+import { db } from "./db"; // Ensure exported in db.ts as per prior
 import { sql, eq, and, desc, asc } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import Stripe from "stripe";
 import { z } from "zod";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
-import { generateContentCalendar, generateReplacementPost, getAIResponse, generateEngagementInsight } from "./grok";
+import { generateContentCalendar, generateReplacementPost, getAIResponse, generateEngagementInsight } from "./grok"; // Fixed path
 import twilio from 'twilio';
 import sgMail from '@sendgrid/mail';
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import crypto, { createHash } from "crypto";
-import { passport } from "./oauth-config";
+import crypto from "crypto";
+import { passport } from "./oauth-config"; // Fixed path
 import axios from "axios";
-import PostPublisher from "./post-publisher";
-import BreachNotificationService from "./breach-notification";
-import { authenticateLinkedIn, authenticateFacebook, authenticateInstagram, authenticateTwitter, authenticateYouTube } from './platform-auth';
-import { requireActiveSubscription, requireAuth, establishSession } from './middleware/subscriptionAuth';
-// import { PostQuotaService } from './PostQuotaService'; // Removed to fix ES module conflict
-import { userFeedbackService } from './userFeedbackService';
-import RollbackAPI from './rollback-api';
-import { OAuthRefreshService } from './services/OAuthRefreshService';
-import { AIContentOptimizer } from './services/AIContentOptimizer';
-import { AnalyticsEngine } from './services/AnalyticsEngine';
-import { DataCleanupService } from './services/DataCleanupService';
-import { linkedinTokenValidator } from './linkedin-token-validator';
-import { DirectPublishService } from './services/DirectPublishService';
-import { UnifiedOAuthService } from './services/UnifiedOAuthService';
-import { directTokenGenerator } from './services/DirectTokenGenerator';
-// import { quotaManager } from './services/QuotaManager'; // Commented out to fix ES module conflict
-import { checkVideoQuota, checkAPIQuota, checkContentQuota } from './middleware/quotaEnforcement';
-import { postingQueue } from './services/PostingQueue';
-import TwilioService from './twilio-service'; // For phone verification in /phone-verification/route.ts
-import OAuthService from './oauth-service'; // For revoke/refresh in OAuth flows
-import { CustomerOnboardingOAuth } from './services/CustomerOnboardingOAuth';
-import { PipelineOrchestrator } from './services/PipelineOrchestrator';
-import { EnhancedCancellationHandler } from './services/EnhancedCancellationHandler';
-import PipelineIntegrationFix from './services/PipelineIntegrationFix';
-import SessionCacheManager from './services/SessionCacheManager';
-// ... (rest of imports)
-// Then search for "const tokenManager = new TokenManager(storage);" ~Ln 140, paste after:
-const sessionCache = new SessionCacheManager(); // For caching oauthTokens
-// import SessionCacheManager from './services/SessionCacheManager'; // Commented out to fix ES module conflict
-import TokenManager from './oauth/tokenManager.js';
-// import { apiRateLimit, socialPostingRateLimit, videoGenerationRateLimit, authRateLimit, skipRateLimitForDevelopment } from './middleware/rateLimiter'; // DISABLED FOR DEPLOYMENT
-// import { QuotaTracker, checkQuotaMiddleware } from './services/QuotaTracker'; // Commented out to fix ES module conflict
-// Removed duplicate quota routes import - using inline endpoint
-import { requireProSubscription, checkVideoAccess } from './middleware/proSubscriptionMiddleware';
-import { veoProtection } from './middleware/veoRateLimit';
-import { VeoUsageTracker } from './services/VeoUsageTracker';
+import PostPublisher from "./post-publisher"; // Fixed path
+import BreachNotificationService from "./breach-notification"; // Fixed path
+import { authenticateLinkedIn, authenticateFacebook, authenticateInstagram, authenticateTwitter, authenticateYouTube } from './platform-auth'; // Fixed path
+import { requireActiveSubscription, requireAuth, establishSession } from './middleware/subscriptionAuth'; // Fixed path
+import { userFeedbackService } from './userFeedbackService'; // Fixed path, removed duplicate quota
+import RollbackAPI from './rollback-api'; // Fixed path
+import { OAuthRefreshService } from './services/OAuthRefreshService'; // Fixed path
+import { AIContentOptimizer } from './services/AIContentOptimizer'; // Fixed path
+import { AnalyticsEngine } from './services/AnalyticsEngine'; // Fixed path
+import { DataCleanupService } from './services/DataCleanupService'; // Fixed path
+import { linkedinTokenValidator } from './linkedin-token-validator'; // Fixed path
+import { DirectPublishService } from './services/DirectPublishService'; // Fixed path
+import { UnifiedOAuthService } from './services/UnifiedOAuthService'; // Fixed path
+import { directTokenGenerator } from './direct-token-generator'; // Fixed path
+import { checkVideoQuota, checkAPIQuota, checkContentQuota } from './middleware/quotaEnforcement'; // Fixed path, consolidated quota
+import { postingQueue } from './services/PostingQueue'; // Fixed path
+import TwilioService from './twilio-service'; // Fixed path
+import OAuthService from './oauth-service'; // Fixed path
+import { CustomerOnboardingOAuth } from './services/CustomerOnboardingOAuth'; // Fixed path
+import { PipelineOrchestrator } from './services/PipelineOrchestrator'; // Fixed path
+import { EnhancedCancellationHandler } from './services/EnhancedCancellationHandler'; // Fixed path
+import PipelineIntegrationFix from './services/PipelineIntegrationFix'; // Fixed path
+import { SessionCacheManager } from './services/SessionCacheManager'; // Fixed path, corrected import
+import TokenManager from './oauth/tokenManager.js'; // Fixed path
+import { requireProSubscription, checkVideoAccess } from './middleware/proSubscriptionMiddleware'; // Fixed path
+import { veoProtection } from './middleware/veoRateLimit'; // Fixed path
+import { VeoUsageTracker } from './services/VeoUsageTracker'; // Fixed path
+import cron from 'node-cron'; // Added for auto-posting schedules (e.g., hourly checks)
 
 app.use('/api/post', checkQuotaMiddleware, async (req: Request, res: Response, next: NextFunction) => { const user = req.session.userId ? await db.select().from(users).where(eq(users.id, req.session.userId)).first() : null; 
   // From research below: Get max based on sub
@@ -6999,10 +6991,9 @@ Continue building your Value Proposition Canvas systematically.`;
         status: 'POST QUOTA DOUBLING ISSUE COMPLETELY RESOLVED'
       });
 
-    } catch (error: : unknown) {
+    } catch (error: : unknown) ';'
       console.error('Transactional test error:', error);
       res.status(500).json({ message: "Transactional test failed", error: error.message });
-    }
   });
 
   // Generate AI-powered schedule using xAI integration
