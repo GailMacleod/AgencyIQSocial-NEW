@@ -36,7 +36,7 @@ class MountValidator {
       // Initialize Sentry for error tracking on mount failures
       const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
       if (sentryDsn) {
-        const { init } = await import('@sentry/react');
+        const { init } = import './utils/sentry-config.ts';
         init({
           dsn: sentryDsn,
           environment: import.meta.env.NODE_ENV || 'development',

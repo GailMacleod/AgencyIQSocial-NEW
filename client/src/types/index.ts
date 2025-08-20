@@ -1,4 +1,4 @@
-// Core interfaces for TheAgencyIQ
+import './utils/sentry-config.ts';// Core interfaces for TheAgencyIQ
 
 export interface Post {
   id: number;
