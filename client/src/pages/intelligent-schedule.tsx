@@ -879,7 +879,7 @@ function IntelligentSchedule() {
                       localEvent: post.localEvent,
                       strategicTheme: post.strategicTheme,
                       businessCanvasPhase: post.businessCanvasPhase,
-                      engagementOptimisation: post.engagementOptimisation,
+                      engagementOptimization: post.engagementOptimization,
                       analytics: post.analytics,
                       hasVideo: post.hasVideo,
                       videoApproved: post.videoApproved,
