@@ -1,70 +1,81 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage"; // Fixed from absolute path
+import { storage } from "./storage";
 import { insertUserSchema, insertBrandPurposeSchema, insertPostSchema, users, postLedger, postSchedule, platformConnections, posts, brandPurpose, giftCertificates } from "@shared/schema";
-import { db } from "./db"; // Ensure exported in db.ts as per prior
+import { db } from "./db";
 import { sql, eq, and, desc, asc } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import Stripe from "stripe";
 import { z } from "zod";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
-import { generateContentCalendar, generateReplacementPost, getAIResponse, generateEngagementInsight } from "./grok"; // Fixed path
+import { generateContentCalendar, generateReplacementPost, getAIResponse, generateEngagementInsight } from "./grok";
 import twilio from 'twilio';
 import sgMail from '@sendgrid/mail';
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import { passport } from "./oauth-config"; // Fixed path
+import { passport } from "./oauth-config";
 import axios from "axios";
-import PostPublisher from "./post-publisher"; // Fixed path
-import BreachNotificationService from "./breach-notification"; // Fixed path
-import { authenticateLinkedIn, authenticateFacebook, authenticateInstagram, authenticateTwitter, authenticateYouTube } from './platform-auth'; // Fixed path
-import { requireActiveSubscription, requireAuth, establishSession } from './middleware/subscriptionAuth'; // Fixed path
-import { userFeedbackService } from './userFeedbackService'; // Fixed path, removed duplicate quota
-import RollbackAPI from './rollback-api'; // Fixed path
-import { OAuthRefreshService } from './services/OAuthRefreshService'; // Fixed path
-import { AIContentOptimizer } from './services/AIContentOptimizer'; // Fixed path
-import { AnalyticsEngine } from './services/AnalyticsEngine'; // Fixed path
-import { DataCleanupService } from './services/DataCleanupService'; // Fixed path
-import { linkedinTokenValidator } from './linkedin-token-validator'; // Fixed path
-import { DirectPublishService } from './services/DirectPublishService'; // Fixed path
-import { UnifiedOAuthService } from './services/UnifiedOAuthService'; // Fixed path
-import { directTokenGenerator } from './direct-token-generator'; // Fixed path
-import { checkVideoQuota, checkAPIQuota, checkContentQuota } from './middleware/quotaEnforcement'; // Fixed path, consolidated quota
-import { postingQueue } from './services/PostingQueue'; // Fixed path
-import TwilioService from './twilio-service'; // Fixed path
-import OAuthService from './oauth-service'; // Fixed path
-import { CustomerOnboardingOAuth } from './services/CustomerOnboardingOAuth'; // Fixed path
-import { PipelineOrchestrator } from './services/PipelineOrchestrator'; // Fixed path
-import { EnhancedCancellationHandler } from './services/EnhancedCancellationHandler'; // Fixed path
-import PipelineIntegrationFix from './services/PipelineIntegrationFix'; // Fixed path
-import { SessionCacheManager } from './services/SessionCacheManager'; // Fixed path, corrected import
-import TokenManager from './oauth/tokenManager.js'; // Fixed path
-import { requireProSubscription, checkVideoAccess } from './middleware/proSubscriptionMiddleware'; // Fixed path
-import { veoProtection } from './middleware/veoRateLimit'; // Fixed path
-import { VeoUsageTracker } from './services/VeoUsageTracker'; // Fixed path
-import cron from 'node-cron'; // Added for auto-posting schedules (e.g., hourly checks)
+import PostPublisher from "./post-publisher";
+import BreachNotificationService from "./breach-notification";
+import { authenticateLinkedIn, authenticateFacebook, authenticateInstagram, authenticateTwitter, authenticateYouTube } from './platform-auth';
+import { requireActiveSubscription, requireAuth, establishSession } from './middleware/subscriptionAuth';
+import { userFeedbackService } from './userFeedbackService';
+import RollbackAPI from './rollback-api';
+import { OAuthRefreshService } from './services/OAuthRefreshService';
+import { AIContentOptimizer } from './services/AIContentOptimizer';
+import { AnalyticsEngine } from './services/AnalyticsEngine';
+import { DataCleanupService } from './services/DataCleanupService';
+import { linkedinTokenValidator } from './linkedin-token-validator';
+import { DirectPublishService } from './services/DirectPublishService';
+import { UnifiedOAuthService } from './services/UnifiedOAuthService';
+import { directTokenGenerator } from './direct-token-generator';
+import { checkVideoQuota, checkAPIQuota, checkContentQuota } from './middleware/quotaEnforcement';
+import { postingQueue } from './services/PostingQueue';
+import TwilioService from './twilio-service';
+import OAuthService from './oauth-service';
+import { CustomerOnboardingOAuth } from './services/CustomerOnboardingOAuth';
+import { PipelineOrchestrator } from './services/PipelineOrchestrator';
+import { EnhancedCancellationHandler } from './services/EnhancedCancellationHandler';
+import PipelineIntegrationFix from './services/PipelineIntegrationFix';
+import { SessionCacheManager } from './services/SessionCacheManager';
+import TokenManager from './oauth/tokenManager.js';
+import { requireProSubscription, checkVideoAccess } from './middleware/proSubscriptionMiddleware';
+import { veoProtection } from './middleware/veoRateLimit';
+import { VeoUsageTracker } from './services/VeoUsageTracker';
+const app = express();
+const httpServer = createServer(app);
 
-app.use('/api/post', checkQuotaMiddleware, async (req: Request, res: Response, next: NextFunction) => { const user = req.session.userId ? await db.select().from(users).where(eq(users.id, req.session.userId)).first() : null; 
-  // From research below: Get max based on sub
-  const maxPosts = user.subscriptionActive === true ? 90 : 10;
-const quotas = user.stripeSubscriptionActive ? { twitter: 90, instagram: 90, facebook: 450, linkedin: 450, youtube: 9000 } : { twitter: 10, instagram: 10, facebook: 50, linkedin: 50, youtube: 1000 }; // From research, buffered
-const platform = req.body.platform || 'twitter'; // Default to twitter if not specified
-const dailyPosts = user[`daily_posts_${platform}`] || 0; // Assume DB columns added
-const user = await db.select().from(users).where(eq(users.id, req.session.userId as number)).first();
-if (dailyPosts >= quotas[platform]) return res.status(429).json({ error: `Quota exceeded for ${platform} - Upgrade!` });
-if (published[platform.toLowerCase()] >= quotaLimits[platform.toLowerCase()]) return res.status(429).json({ error: 'Quota exceeded for ' + platform + ' - Upgrade!' });
-  if (user.daily_posts >= maxPosts) return res.status(429).json({ error: 'Quota exceeded - Upgrade!' });
+// Sessions for secure auth persistence (cookies for userId post-OAuth/Stripe)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'fallback-secret-research-env', // Research: Use strong random from env
+  store: new (connectPg(session))({ conString: process.env.DATABASE_URL }), // PG store for production
+  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, secure: true, httpOnly: true, sameSite: 'strict' }, // Secure flags
+  resave: false,
+  saveUninitialized: false
+}));
+
+// Add session cache (from code)
+const sessionCache = new SessionCacheManager(); // For caching oauthTokens
+
+// Middleware for quotas (maximize posts without bans)
+app.use('/api/post', async (req, res, next) => {
+  const userId = req.session.userId;
+  const platform = req.body.platform;
+  if (!userId || !platform) return res.status(401).json({ error: 'Unauthorized' });
+  const count = await db.select({ count: sql`count(*)` }).from(posts).where(and(eq(posts.userId, userId), eq(posts.platform, platform), sql`publishedAt > NOW() - INTERVAL '1 day'`));
+  const max = platform === 'twitter' ? 1667 : (platform === 'linkedin' ? 100 : 500); // Researched limits
+  if (count[0].count >= max * 0.95) return res.status(429).json({ error: 'Quota reached - try tomorrow' });
   next();
-  await db.update(users).set({ [`daily_posts_${platform}`]: sql`${users[`daily_posts_${platform}`]} + 1` }).where(eq(users.id, req.session.userId));
-// Daily reset stub (integrate with DataCleanupService ~Ln 35 as cron)
-if (new Date().getDate() !== new Date(user.lastReset || 0).getDate()) {
-  await db.update(users).set({ ...Object.fromEntries(Object.keys(quotas).map(p => [`daily_posts_${p}`, 0])), lastReset: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, req.session.userId));
-}
 });
+
+// Existing from code (e.g., rate limits, auth)
+app.use(requireAuth);
+app.use(veoProtection); // For Veo quotas
+// ... add other middleware like checkVideoQuota if needed
 
 app.use(session({
   store: new (connectPg(session))({ conString: process.env.DATABASE_URL }),
@@ -2249,32 +2260,6 @@ app.post('/api/refresh-oauth', requireAuth, async (req: Request, res: Response) 
       res.status(500).json({ error: 'Webhook processing failed' });
     }
   });
-
-  // Seedance webhook endpoint for video generation completion
-  app.post('/api/seedance-webhook', async (req: Request, res: Response) => {
-    try {
-      const { id, status, output, error } = req.body;
-      console.log(`🎬 Seedance webhook received: ${id} - ${status}`);
-      
-      // Accept all webhooks - signature validation disabled for now
-      // Replicate uses different signature format than expected
-      console.log(`📝 Webhook signature:`, req.headers['webhook-signature']);
-      
-      if (status === 'succeeded' && output) {
-        console.log(`✅ Seedance video generation completed: ${output}`);
-        console.log(`📹 Real video URL available: ${output}`);
-        
-        // Store latest video URL in memory for demo purposes
-        global.latestSeedanceVideo = {
-          id,
-          url: output,
-          timestamp: new Date().toISOString()
-        };
-        
-        console.log(`💾 Stored latest video for preview: ${output.substring(0, 50)}...`);
-      } else if (status === 'failed') {
-        console.log(`❌ Seedance video generation failed: ${error}`);
-      }
       
       res.status(200).json({ received: true, videoUrl: output });
     } catch (error) {
@@ -12578,20 +12563,16 @@ throw new Error('OAuth setup failed—check production-oauth.js and env secrets'
     }
   });
 
-  // Publish approved post (with video + text) to platforms
-  app.post('/api/post/publish-approved', async (req: Request, res: Response) => {
-    try {
-      const { userId, postId, platforms } = req.body;
-      const VideoService = (await import('./videoService.js')).default;
-      
-      // Get the approved post with video data
-      const post = await storage.getPost(postId);
-      if (!post || !post.videoApproved) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Post not approved or no video attached' 
-        });
-      }
+// Old broken (no quota/cron)
+
+
+  app.use('/api/posts', async (req, res, next) => {  // Quota middleware
+      const userId = req.session.userId;  // From sessions
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const count = await db.select({ count: sqlcount(*) }).from(posts).where(and(eq(posts.userId, userId), sqlpublishedAt > NOW() - INTERVAL '1 day'));
+  if (count[0].count >= 1600) return res.status(429).json({ error: 'Daily quota reached' });  // Maximized ~95% of 1667
+next();
+});
       
       // Publish combined video + text content
       const result = await VideoService.approveAndPostVideo(userId, postId, post.videoData, platforms);
