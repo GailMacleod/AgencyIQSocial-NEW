@@ -1,77 +1,109 @@
-// Sentry is disabled to keep costs down.
-// Lightweight shim so calls like window.Sentry.captureException(...) won't crash.
+// client/src/lib/sentry-config.ts
+// -----------------------------------------------------------------------------
+// Zero-cost Sentry shim so calls like
+//   window.Sentry.captureException(error, { tags: {...}, extra: {...} })
+//   sentryLogger.error(err, { ... })
+//   setupGlobalErrorHandlers()
+// all work without pulling the Sentry SDK.
+// -----------------------------------------------------------------------------
 
-declare global {
-  interface Window {
-    Sentry?: SentryShim;
-  }
-}
+// NOTE: This file intentionally does NOT declare `window.Sentry` globally.
+// Keep the single global type declaration in: client/src/types/global.d.ts
 
 type Level = 'fatal' | 'error' | 'warning' | 'log' | 'info' | 'debug';
-type CaptureContext = Record<string, unknown>;
 
-interface SentryShim {
-  captureException: (_error: unknown, _context?: CaptureContext) => void;
-  captureMessage: (_message: string, _level?: Level) => void;
-  setUser: (_user: Record<string, unknown> | null) => void;
-  setTag: (_key: string, _value: string) => void;
-  setContext: (_key: string, _context: CaptureContext | null) => void;
-  addBreadcrumb: (_breadcrumb: CaptureContext) => void;
-  configureScope: (_cb: (_scope: unknown) => void) => void;
-}
+export type SentryContext = {
+  tags?: Record<string, string>;
+  extra?: Record<string, unknown>;
+};
+
+type SentryShim = {
+  captureException: (error: Error, context?: SentryContext) => void;
+  captureMessage: (message: string, level?: Level) => void;
+  setUser: (user: Record<string, unknown> | null) => void;
+  setTag: (key: string, value: string) => void;
+  setContext: (key: string, context: Record<string, unknown> | null) => void;
+  addBreadcrumb: (breadcrumb: Record<string, unknown>) => void;
+  configureScope: (cb: (scope: unknown) => void) => void;
+};
+
+type SentryWindow = Window & { Sentry?: SentryShim };
+
+const isDev =
+  typeof import.meta !== 'undefined' && !!(import.meta as any).env?.DEV;
 
 const devLog = (...args: unknown[]) => {
-  if (import.meta.env.DEV) {
-    console.log('[Sentry shim]', ...args);
+  if (isDev) {
+    // eslint-disable-next-line no-console
+    console.log('[SentryShim]', ...args);
   }
 };
 
 const shim: SentryShim = {
-  captureException(_error, _context) {
-    devLog('captureException', _error, _context);
+  captureException(error, context) {
+    devLog('captureException', error, context ?? {});
   },
-  captureMessage(_message, _level) {
-    devLog('captureMessage', _message, _level);
+  captureMessage(message, level) {
+    devLog('captureMessage', { message, level: level ?? 'info' });
   },
-  setUser(_user) {
-    devLog('setUser', _user);
+  setUser(user) {
+    devLog('setUser', user);
   },
-  setTag(_key, _value) {
-    devLog('setTag', _key, _value);
+  setTag(key, value) {
+    devLog('setTag', key, value);
   },
-  setContext(_key, _context) {
-    devLog('setContext', _key, _context);
+  setContext(key, context) {
+    devLog('setContext', key, context);
   },
-  addBreadcrumb(_breadcrumb) {
-    devLog('addBreadcrumb', _breadcrumb);
+  addBreadcrumb(breadcrumb) {
+    devLog('addBreadcrumb', breadcrumb);
   },
-  configureScope(_cb) {
+  configureScope(cb) {
     devLog('configureScope');
-    try { _cb({}); } catch { /* ignore */ }
+    try {
+      cb({});
+    } catch {
+      /* ignore */
+    }
   },
 };
 
+// Install the shim once (idempotent).
 export function initSentry(): void {
-  window.Sentry = shim;
+  const win = window as SentryWindow;
+  if (!win.Sentry) win.Sentry = shim;
 }
-
-// Auto-initialize so window.Sentry is always defined if this file is imported.
 initSentry();
 
-// Convenience exports for files that import helpers
-export const captureException = (_error: unknown, _context?: CaptureContext) =>
-  window.Sentry?.captureException(_error, _context);
+// -----------------------------------------------------------------------------
+// Convenience wrappers that other parts of the app import
+// -----------------------------------------------------------------------------
 
-export const captureMessage = (_message: string, _level?: Level) =>
-  window.Sentry?.captureMessage(_message, _level);
-
-// For components importing these:
-export const sentryLogger = {
-  error: (_error: unknown, _context?: CaptureContext) => captureException(_error, _context),
-  info: (_message: string | unknown, _extra?: CaptureContext) =>
-    captureMessage(typeof _message === 'string' ? _message : String(_message), 'info'),
+export const captureException = (error: unknown, context?: SentryContext) => {
+  const err = error instanceof Error ? error : new Error(String(error));
+  (window as SentryWindow).Sentry?.captureException(err, context);
 };
 
+export const captureMessage = (message: string, level?: Level) =>
+  (window as SentryWindow).Sentry?.captureMessage(message, level);
+
+export const setUser = (user: Record<string, unknown> | null) =>
+  (window as SentryWindow).Sentry?.setUser(user);
+
+export const setTag = (key: string, value: string) =>
+  (window as SentryWindow).Sentry?.setTag(key, value);
+
+export const setContext = (key: string, ctx: Record<string, unknown> | null) =>
+  (window as SentryWindow).Sentry?.setContext(key, ctx);
+
+// Logger object some files expect
+export const sentryLogger = {
+  error: (error: unknown, context?: SentryContext) => captureException(error, context),
+  info: (message: string | unknown) =>
+    captureMessage(typeof message === 'string' ? message : String(message), 'info'),
+};
+
+// Global error handlers some files call at startup
 let handlersInstalled = false;
 export function setupGlobalErrorHandlers(): void {
   if (handlersInstalled) return;
@@ -79,7 +111,10 @@ export function setupGlobalErrorHandlers(): void {
 
   window.addEventListener('error', (ev) => {
     const ee = ev as ErrorEvent;
-    const err = ee.error ?? new Error(ee.message || 'Unknown error');
+    const err =
+      ee?.error instanceof Error
+        ? ee.error
+        : new Error(ee?.message || 'Unknown error');
     captureException(err, {
       tags: { component: 'window.error' },
       extra: { href: window.location.href },
@@ -88,8 +123,9 @@ export function setupGlobalErrorHandlers(): void {
 
   window.addEventListener('unhandledrejection', (ev) => {
     const pre = ev as PromiseRejectionEvent;
-    const reason = pre.reason;
-    captureException(reason instanceof Error ? reason : new Error(String(reason) || 'Unhandled rejection'), {
+    const reason = pre?.reason;
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    captureException(err, {
       tags: { component: 'unhandledrejection' },
       extra: { href: window.location.href, reason },
     });

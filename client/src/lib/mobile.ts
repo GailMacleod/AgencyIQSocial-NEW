@@ -200,10 +200,3 @@ export const getResponsiveClasses = (state: MobileDetectionState): string => {
 
 import { useState, useEffect } from 'react';
 
-declare global {
-  interface Window {
-    Sentry?: {
-      captureException: (error: Error, context?: any) => void;
-    };
-  }
-}
