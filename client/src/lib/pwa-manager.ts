@@ -1,3 +1,5 @@
+import '@/lib/sentry-config';
+
 /**
  * Enhanced PWA Manager with Installation State Management
  * Handles PWA prompt display logic and installation tracking
@@ -287,10 +289,3 @@ export const showPWAPrompt = () => pwaManager.showInstallPrompt();
 
 import { useState, useEffect } from 'react';
 
-declare global {
-  interface Window {
-    Sentry?: {
-      captureException: (error: Error, context?: any) => void;
-    };
-  }
-}

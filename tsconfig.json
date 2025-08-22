@@ -20,9 +20,10 @@
       "@/*": ["./client/src/*"],
       "@assets/*": ["./attached_assets/*"],
       "@shared/*": ["./shared/*"]
-    }
+    },
+    "composite": true  // Add: Enables references for multi-project build
   },
-  "include": ["client/src", "shared", "types/**/*.d.ts"],
-  "exclude": ["node_modules"],
+  "include": ["client/src/**/*.ts", "client/src/**/*.tsx", "vite-env.d.ts", "src/types/**/*.d.ts"],  // Update: Explicit client paths to avoid server overlap
+  "exclude": ["node_modules", "dist", "server/**"],  // Update: Exclude all server to prevent client compiler from touching it
   "references": [{ "path": "./tsconfig.node.json" }]
 }

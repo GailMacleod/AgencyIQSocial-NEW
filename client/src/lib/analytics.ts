@@ -1,13 +1,5 @@
-// Define the gtag function globally
-declare global {
-  interface Window {
-    dataLayer: any[];
-    gtag: (...args: any[]) => void;
-    Sentry?: {
-      captureException: (error: Error) => void;
-    };
-  }
-}
+// import '@/lib/sentry-config';
+
 
 // Initialize Google Analytics with comprehensive error handling
 export const initGA = () => {

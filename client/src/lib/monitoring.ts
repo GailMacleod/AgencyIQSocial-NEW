@@ -1,87 +1,55 @@
-- import * as Sentry from '@sentry/node'; // Remove this line entirely
-+ import './utils/sentry-config.ts'; // Import shim (adjust path if utils folder doesn't exist; create it)
+// client/src/lib/monitoring.ts
+// Monitoring/Sentry disabled build-safe helpers.
+// We load the no-cost shim so window.Sentry exists if other code calls it.
+import '@/lib/sentry-config';
 
-- Sentry.init({
--   dsn: process.env.SENTRY_DSN, // Or whatever init was here
--   // ... other config like integrations, tracesSampleRate
-- }); // Remove entire init block
+type Ctx = Record<string, unknown>;
+type Level = 'fatal' | 'error' | 'warning' | 'log' | 'info' | 'debug';
 
-// Keep any other code, but replace calls like:
-- Sentry.captureException(error, { tags: { service: 'oauth' } });
-+ captureException(error, { tags: { service: 'oauth' } }); // Or global.Sentry if preferred
-
-export function initializeClientMonitoring() {
-  if (import.meta.env.PROD) {
-    Sentry.init({
-      dsn: import.meta.env.VITE_SENTRY_DSN,
-      environment: import.meta.env.MODE,
-      integrations: [
-        Sentry.browserTracingIntegration(),
-        Sentry.replayIntegration(),
-      ],
-      tracesSampleRate: 1.0,
-      replaysSessionSampleRate: 0.1,- import * as Sentry from '@sentry/node'; // Remove this line entirely
-+ import './utils/sentry-config.ts'; // Import shim (adjust path if utils folder doesn't exist; create it)
-
-- Sentry.init({
--   dsn: process.env.SENTRY_DSN, // Or whatever init was here
--   // ... other config like integrations, tracesSampleRate
-- }); // Remove entire init block
-
-// Keep any other code, but replace calls like:
-- Sentry.captureException(error, { tags: { service: 'oauth' } });
-+ captureException(error, { tags: { service: 'oauth' } }); // Or global.Sentry if preferred
-
-export function initializeClientMonitoring() {
-  if (import.meta.env.PROD) {
-    Sentry.init({
-      dsn: import.meta.env.VITE_SENTRY_DSN,
-      environment: import.meta.env.MODE,
-      integrations: [
-        Sentry.browserTracingIntegration(),
-        Sentry.replayIntegration(),
-      ],
-      tracesSampleRate: 1.0,
-      replaysSessionSampleRate: 0.1,
-      replaysOnErrorSampleRate: 1.0,
-    });
-  }
+function sentry() {
+  return (window as unknown as {
+    Sentry?: {
+      captureException: (error: Error, context?: Ctx) => void;
+      captureMessage?: (message: string, level?: string) => void;
+      setUser?: (user: Record<string, unknown> | null) => void;
+      setTag?: (key: string, value: string) => void;
+      setContext?: (key: string, context: Ctx | null) => void;
+    };
+  }).Sentry;
 }
 
-export function logClientError(error: Error, context?: any) {
-  if (import.meta.env.PROD) {
-    Sentry.captureException(error, { extra: context });
-  } else {
-    console.error('Client Error:', error.message, context);
-  }
+export function initMonitoring(): void {
+  // No-op; shim is already attached by importing sentry-config above.
 }
 
-export function setUserContext(user: any) {
-  if (import.meta.env.PROD) {
-    Sentry.setUser({
-      id: user.id,
-      email: user.email,
-    });
-  }
-}
-      replaysOnErrorSampleRate: 1.0,
-    });
-  }
+export function captureException(error: unknown, context?: Ctx): void {
+  sentry()?.captureException(error as Error, context);
 }
 
-export function logClientError(error: Error, context?: any) {
-  if (import.meta.env.PROD) {
-    Sentry.captureException(error, { extra: context });
-  } else {
-    console.error('Client Error:', error.message, context);
-  }
+export function captureMessage(message: string, level?: Level): void {
+  sentry()?.captureMessage?.(message, level);
 }
 
-export function setUserContext(user: any) {
-  if (import.meta.env.PROD) {
-    Sentry.setUser({
-      id: user.id,
-      email: user.email,
-    });
-  }
+export function setUser(user: Record<string, unknown> | null): void {
+  sentry()?.setUser?.(user);
 }
+
+export function setTag(key: string, value: string): void {
+  sentry()?.setTag?.(key, value);
+}
+
+export function setContext(key: string, context: Ctx | null): void {
+  sentry()?.setContext?.(key, context);
+}
+
+// Optional default export for convenience in places that do `import monitoring from ...`
+const Monitoring = {
+  init: initMonitoring,
+  captureException,
+  captureMessage,
+  setUser,
+  setTag,
+  setContext,
+};
+
+export default Monitoring;
