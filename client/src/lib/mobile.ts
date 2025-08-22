@@ -13,7 +13,7 @@ export interface MobileDetectionState {
 }
 
 class MobileDetectionManager {
-  private listeners: Set<(state: MobileDetectionState) => void> = new Set();
+
   private currentState: MobileDetectionState;
   private resizeHandler?: () => void;
   private orientationHandler?: () => void;
